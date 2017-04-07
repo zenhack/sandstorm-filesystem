@@ -9,12 +9,14 @@ $Go.import("zenhack.net/go/sandstorm-filesystem");
 # This file specifies a schema that sandstorm grains may use to share files
 # and directories with one another.
 #
+# We follow the suggested conventions for doing requests/offers. Any of the
+# interfaces in this file may be requested or offered; use the interface id
+# as the tag, and leave the value null.
+#
 # NOTE: this is *unstable*. Backwards-incompatible changes may be made to this
 # schema until we settle on a final-ish design.
-#
-# TODO: document how one does a powerbox offer/request with these.
 
-interface Node {
+interface Node @0x955400781a01b061 {
   # A node in the filesystem. This is either a file or a directory.
 
   type @0 () -> (type :Type);
@@ -30,7 +32,7 @@ interface Node {
   # one of the Rw* interfaces below.
 }
 
-interface Directory extends(Node) {
+interface Directory @0xce3039544779e0fc extends(Node) {
   # A (possibly read-only) directory.
 
   list @0 () -> (list: List(Entry));
@@ -48,7 +50,7 @@ interface Directory extends(Node) {
   # Open a file in this directory.
 }
 
-interface RwDirectory extends(Directory) {
+interface RwDirectory @0xdffe2836f5c5dffc extends(Directory) {
   # A directory, with write access.
 
   create @0 (name :Text, type :Node.Type) -> (node :Node);
@@ -60,7 +62,7 @@ interface RwDirectory extends(Directory) {
   # Delete the node in this directory named `name`.
 }
 
-interface File extends(Node) {
+interface File @0xaa5b133d60884bbd extends(Node) {
   # A regular file
 
   size @0 () -> (size: UInt64);
@@ -76,7 +78,7 @@ interface File extends(Node) {
   # be canceled.
 }
 
-interface RwFile extends(File) {
+interface RwFile @0xb4810121539f6e53 extends(File) {
   # A file, with write access.
 
   write @0 (startAt :UInt64) -> (sink :Util.ByteStream);
