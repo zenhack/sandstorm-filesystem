@@ -19,9 +19,15 @@ set -euo pipefail
 
 # By default, this script does nothing.  You'll have to modify it as
 # appropriate for your application.
-cd /opt/app
+
 
 export GOPATH=$HOME/go
+
+[ -d $GOPATH/src/zenhack.net/go/ ] || mkdir -p $GOPATH/src/zenhack.net/go/
+[ -L $GOPATH/src/zenhack.net/go/sandstorm-filesystem ] || \
+	ln -s /opt/app $GOPATH/src/zenhack.net/go/sandstorm-filesystem
+
+cd /opt/app
 go get -d ./...
 go build -v -i
 
