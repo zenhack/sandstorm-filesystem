@@ -17,6 +17,8 @@ func chkfatal(err error) {
 	}
 }
 
+// Figure out what "action" from sandstorm-pkgdef.capnp created this
+// grain.
 func getAction() string {
 	if len(os.Args) != 2 {
 		panic("len(os.Args) != 2")
