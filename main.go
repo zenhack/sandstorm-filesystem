@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"io/ioutil"
-	"net/http"
+	//"net/http"
 	"os"
-	//grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
+	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
 	//ws_capnp "zenhack.net/go/sandstorm/capnp/websession"
 	"zenhack.net/go/sandstorm/grain"
-	"zenhack.net/go/sandstorm/websession"
+	//"zenhack.net/go/sandstorm/websession"
 )
 
 func chkfatal(err error) {
@@ -50,16 +50,27 @@ func getAction() string {
 }
 
 func main() {
+	var uiView grain_capnp.UiView_Server
+
 	action := getAction()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		w.Write([]byte(action))
-	})
+	switch action {
+	case "localfs":
+		uiView = NewLocalFS()
+	case "hello":
+		uiView = &Hello{}
+	case "goodbye":
+		fallthrough
+	default:
+		panic("Unexpected action type: " + action)
+	}
 	ctx := context.Background()
-	ws := websession.FromHandler(ctx, http.DefaultServeMux)
-	_, err := grain.ConnectAPI(ctx, ws)
+	_, err := grain.ConnectAPI(ctx, uiView)
 	if err != nil {
 		panic(err)
 	}
 	<-ctx.Done()
+}
+
+type Hello struct {
 }
