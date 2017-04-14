@@ -29,13 +29,23 @@ const pkgdef :Spk.PackageDefinition = (
     actions = [
       # Define your "new document" handlers here.
       ( nounPhrase = (defaultText = "hello"),
-        command = .helloCommand,
-        # The command to run when starting for the first time. (".myCommand"
-        # is just a constant defined at the bottom of the file.)
-      )
+        command = (
+          argv = ["/opt/app/app", "hello"],
+          environ = .myEnviron,
+        ),
+      ),
+      ( nounPhrase = (defaultText = "goodbye"),
+        command = (
+          argv = ["/opt/app/app", "goodbye"],
+          environ = .myEnviron,
+        ),
+      ),
     ],
 
-    continueCommand = .restoreCommand,
+    continueCommand = (
+      argv = ["/opt/app/app", "restore"],
+      environ = .myEnviron,
+    ),
     # This is the command called to start your app back up after it has been
     # shut down for inactivity. Here we're using the same command as for
     # starting a new instance, but you could use different commands for each
@@ -242,13 +252,3 @@ const myEnviron :List(Util.KeyValue) = [
     # can detect if $SANDSTORM="1" at runtime, switching UI and/or backend to use
     # the app's Sandstorm-specific integration code.
   ];
-
-const helloCommand :Spk.Manifest.Command = (
-	argv = ["/opt/app/app", "hello"],
-	environ = .myEnviron,
-);
-
-const restoreCommand :Spk.Manifest.Command = (
-	argv = ["/opt/app/app", "restore"],
-	environ = .myEnviron,
-);
