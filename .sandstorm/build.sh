@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -xeuo pipefail
 # This script is run in the VM each time you run `vagrant-spk dev`.  This is
 # the ideal place to invoke anything which is normally part of your app's build
 # process - transforming the code in your repository into the collection of files
@@ -28,7 +28,7 @@ export GOPATH=$HOME/go
 	ln -s /opt/app $GOPATH/src/zenhack.net/go/sandstorm-filesystem
 
 cd /opt/app
-go get -d ./...
+go get -v -d ./...
 go build -v -i
 
 exit 0

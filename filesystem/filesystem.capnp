@@ -1,11 +1,4 @@
 @0xe91f231103c0780e;
-
-using Go = import "/go.capnp";
-using Util = import "/util.capnp";
-
-$Go.package("filesystem");
-$Go.import("zenhack.net/go/sandstorm-filesystem");
-
 # This file specifies a schema that sandstorm grains may use to share files
 # and directories with one another.
 #
@@ -15,6 +8,14 @@ $Go.import("zenhack.net/go/sandstorm-filesystem");
 #
 # NOTE: this is *unstable*. Backwards-incompatible changes may be made to this
 # schema until we settle on a final-ish design.
+
+using Util = import "/util.capnp";
+
+# Note to non go users: you can just delete this if you don't want to
+# install the go plugin:
+using Go = import "/go.capnp";
+$Go.package("filesystem");
+$Go.import("zenhack.net/go/sandstorm-filesystem");
 
 interface Node @0x955400781a01b061 {
   # A node in the filesystem. This is either a file or a directory.
@@ -32,59 +33,90 @@ interface Node @0x955400781a01b061 {
   # one of the Rw* interfaces below.
 }
 
+enum Whence {
+  start @0;
+  end @1;
+}
+
 interface Directory @0xce3039544779e0fc extends(Node) {
   # A (possibly read-only) directory.
 
-  list @0 () -> (list: List(Entry));
-  # List the contents of the directory. TODO: we probably want some way
-  # to do pagination/otherwise not have to transfer all of the entries at
-  # once.
+
+  list @0 (stream :Entry.Stream) -> (cancel :Util.Handle);
+  # List the contents of the directory. Entries are pushed into `stream`.
+  # The returned handle may be dropped to request canceling the stream.
 
   struct Entry {
-    # A child of a directory.
+    # Information about a child of a directory.
     name @0 :Text;
-    file @1 :Node;
+    canWrite @1 :Bool;
+    node :union {
+      dir @2 :Void;
+      file :group {
+        isExec @3 :Bool;
+      }
+    }
+
+    interface Stream {
+      push @0 (entries :List(Entry));
+      done @1 ();
+    }
   }
 
-  open @1 (name :Text) -> (node :Node);
+
+  walk @1 (name :Text) -> (node :Node);
   # Open a file in this directory.
 }
 
 interface RwDirectory @0xdffe2836f5c5dffc extends(Directory) {
   # A directory, with write access.
 
-  create @0 (name :Text, type :Node.Type) -> (node :Node);
-  # Create a node named `name` within the directory. `type`
-  # indicates what type of node to create. The returned `node`
-  # always implements the writable variant of that type.
+  create @0 (name :Text, isExec :Bool) -> (file :RwFile);
+  # Create a file named `name` in the current directory. `isExec`
+  # indicates whether the file should be executable.
 
-  delete @1 (name :Text);
+  mkDir @1 (name :Text) -> (dir :RwDirectory);
+  # Create a subdirectory named `name` in the current directory.
+
+  delete @2 (name :Text);
   # Delete the node in this directory named `name`.
 }
 
 interface File @0xaa5b133d60884bbd extends(Node) {
   # A regular file
 
-  size @0 () -> (size: UInt64);
+  size @0 () -> (size :UInt64);
   # Return the size of the file.
 
-  read @1 (startAt :UInt64, amount :UInt64, sink :Util.ByteStream) ->
-    (handle :Util.Handle);
+  read @1 (startAt :Int64, amount :UInt64, sink :Util.ByteStream)
+    -> (cancel :Util.Handle);
   # Read `amount` bytes from the file into `sink`, starting at position
   # `startAt`. As a special case, if `amount` is 0, data will be read
   # until the end of the file is reached.
   #
+  # If there are fewer than `amount` bytes, available, data will be read
+  # until the end of the file.
+  #
   # Dropping the returned handle can be used to request that the transfer
   # be canceled.
+
+  isExec @2 () -> (isExec :Bool);
+  # Reports whether or not the file is executable.
 }
 
 interface RwFile @0xb4810121539f6e53 extends(File) {
   # A file, with write access.
 
-  write @0 (startAt :UInt64) -> (sink :Util.ByteStream);
+  write @0 (startAt :Int64, cancel :Util.Handle)
+    -> (sink :Util.ByteStream);
   # Return a ByteStream that can be used to write data to the file.
-  # Writing starts at offset `startAt`.
+  # Writing starts at offset `startAt`. `-1` denotes the end of the file.
 
   truncate @1 (size :UInt64);
   # Truncate the file to `size` bytes.
+
+  setExec @2 (exec :Bool);
+  # Set the executable bit to `exec`.
 }
+
+# vim: set ts=2 sw=2 et :

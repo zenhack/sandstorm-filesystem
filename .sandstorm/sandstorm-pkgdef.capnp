@@ -40,6 +40,12 @@ const pkgdef :Spk.PackageDefinition = (
           environ = .myEnviron,
         ),
       ),
+      ( nounPhrase = (defaultText = "Local Filesystem"),
+        command = (
+          argv = ["/opt/app/app", "localfs"],
+          environ = .myEnviron,
+        ),
+      ),
     ],
 
     continueCommand = (

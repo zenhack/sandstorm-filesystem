@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"io/ioutil"
-	//"net/http"
+	"net/http"
 	"os"
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
 	//ws_capnp "zenhack.net/go/sandstorm/capnp/websession"
 	"zenhack.net/go/sandstorm/grain"
-	//"zenhack.net/go/sandstorm/websession"
+	"zenhack.net/go/sandstorm/websession"
 )
 
 func chkfatal(err error) {
@@ -27,24 +27,13 @@ func getAction() string {
 	if action == "restore" {
 		// We previously saved our on-creation action; load it
 		// from the file.
-		file, err := os.Open("/var/action")
-		chkfatal(err)
-		defer file.Close()
-		data, err := ioutil.ReadAll(file)
+		data, err := ioutil.ReadFile("/var/action")
 		chkfatal(err)
 		action = string(data)
 	} else {
 		// Save the action so we can figure out what it was when
 		// we're restored.
-		file, err := os.Create("/var/action")
-		chkfatal(err)
-		defer file.Close()
-		data := []byte(action)
-		n, err := file.Write(data)
-		chkfatal(err)
-		if n != len(data) {
-			panic("Short read")
-		}
+		chkfatal(ioutil.WriteFile("/var/action", []byte(action), 0600))
 	}
 	return action
 }
@@ -58,7 +47,13 @@ func main() {
 	case "localfs":
 		uiView = NewLocalFS()
 	case "hello":
-		uiView = &Hello{}
+		uiView = &Hello{
+			websession.FromHandler(
+				context.TODO(),
+				http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Write([]byte("Hello!"))
+				})),
+		}
 	case "goodbye":
 		fallthrough
 	default:
@@ -73,4 +68,5 @@ func main() {
 }
 
 type Hello struct {
+	websession.HandlerWebSession
 }
