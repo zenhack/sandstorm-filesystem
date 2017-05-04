@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -54,10 +53,8 @@ func (l *LocalFS) GetViewInfo(p grain_capnp.UiView_getViewInfo) error {
 }
 
 func (l *LocalFS) NewSession(p grain_capnp.UiView_newSession) error {
-	// TODO: don't need to be creating this every time; should just make the client
-	// once.
 	ws := websession.FromHandler(
-		context.TODO(),
+		p.Ctx,
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Write([]byte("This grain doesn't provide much of a user " +
 				"interface (this is it), but you can request a " +
@@ -73,7 +70,7 @@ func (l *LocalFS) NewSession(p grain_capnp.UiView_newSession) error {
 func (l *LocalFS) NewRequestSession(p grain_capnp.UiView_newRequestSession) error {
 	sessionContext := p.Params.Context()
 	sessionContext.FulfillRequest(
-		context.TODO(),
+		p.Ctx,
 		func(p grain_capnp.SessionContext_fulfillRequest_Params) error {
 			// TODO: limit to the thing the user actually asked for; if they didn't ask
 			// for write, don't give it to them.
@@ -86,7 +83,7 @@ func (l *LocalFS) NewRequestSession(p grain_capnp.UiView_newRequestSession) erro
 			p.SetCapPtr(capnp.NewInterface(p.Struct.Segment(), capId).ToPtr())
 			return nil
 		})
-	sessionContext.Close(context.TODO(), func(p grain_capnp.SessionContext_close_Params) error {
+	sessionContext.Close(p.Ctx, func(p grain_capnp.SessionContext_close_Params) error {
 		return nil
 	})
 	return nil
@@ -94,7 +91,7 @@ func (l *LocalFS) NewRequestSession(p grain_capnp.UiView_newRequestSession) erro
 
 func (l *LocalFS) NewOfferSession(p grain_capnp.UiView_newOfferSession) error {
 	p.Params.Context().Close(
-		context.TODO(),
+		p.Ctx,
 		func(p grain_capnp.SessionContext_close_Params) error {
 			return nil
 		})

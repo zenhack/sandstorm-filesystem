@@ -123,7 +123,7 @@ func (d *Directory) List(p filesystem.Directory_list) error {
 		// to find some way to allow more information for debugging.
 		return OpenFailed
 	}
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(p.Ctx)
 	p.Results.SetCancel(util_capnp.Handle_ServerToClient(cancelHandle(cancel)))
 	go func() {
 		defer file.Close()
@@ -328,7 +328,7 @@ func (f *File) Read(p filesystem.File_read) error {
 		return OpenFailed
 	}
 
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(p.Ctx)
 	p.Results.SetCancel(util_capnp.Handle_ServerToClient(cancelHandle(cancel)))
 
 	go func() {
