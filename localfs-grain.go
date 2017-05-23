@@ -54,7 +54,6 @@ func (l *LocalFS) GetViewInfo(p grain_capnp.UiView_getViewInfo) error {
 
 func (l *LocalFS) NewSession(p grain_capnp.UiView_newSession) error {
 	ws := websession.FromHandler(
-		p.Ctx,
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Write([]byte("This grain doesn't provide much of a user " +
 				"interface (this is it), but you can request a " +

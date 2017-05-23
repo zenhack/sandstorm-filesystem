@@ -46,16 +46,9 @@ func main() {
 	switch action {
 	case "localfs":
 		uiView = NewLocalFS()
-	case "hello":
-		uiView = &Hello{
-			websession.FromHandler(
-				context.TODO(),
-				http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-					w.Write([]byte("Hello!"))
-				})),
-		}
-	case "goodbye":
-		fallthrough
+	case "httpview":
+		initHTTPFS()
+		uiView = websession.FromHandler(http.DefaultServeMux)
 	default:
 		panic("Unexpected action type: " + action)
 	}
@@ -65,8 +58,4 @@ func main() {
 		panic(err)
 	}
 	<-ctx.Done()
-}
-
-type Hello struct {
-	websession.HandlerWebSession
 }

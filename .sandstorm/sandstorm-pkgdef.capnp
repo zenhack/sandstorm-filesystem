@@ -28,28 +28,22 @@ const pkgdef :Spk.PackageDefinition = (
 
     actions = [
       # Define your "new document" handlers here.
-      ( nounPhrase = (defaultText = "hello"),
-        command = (
-          argv = ["/opt/app/app", "hello"],
-          environ = .myEnviron,
-        ),
-      ),
-      ( nounPhrase = (defaultText = "goodbye"),
-        command = (
-          argv = ["/opt/app/app", "goodbye"],
-          environ = .myEnviron,
-        ),
-      ),
       ( nounPhrase = (defaultText = "Local Filesystem"),
         command = (
-          argv = ["/opt/app/app", "localfs"],
+          argv = [.myExe, "localfs"],
+          environ = .myEnviron,
+        ),
+      ),
+      ( nounPhrase = (defaultText = "Filesystem Viewer"),
+        command = (
+          argv = [.myExe, "httpview"],
           environ = .myEnviron,
         ),
       ),
     ],
 
     continueCommand = (
-      argv = ["/opt/app/app", "restore"],
+      argv = [.myExe, "restore"],
       environ = .myEnviron,
     ),
     # This is the command called to start your app back up after it has been
@@ -157,8 +151,9 @@ const pkgdef :Spk.PackageDefinition = (
     # automatically by running it on a FUSE filesystem. So, the mappings
     # here are only to tell it where to find files that the app wants.
     searchPath = [
-      ( sourcePath = "." ),  # Search this directory first.
-      ( sourcePath = "/",    # Then search the system root directory.
+      ( sourcePath = "." ),   # Search this directory first.
+      ( sourcePath = ".." ),  # Search the root of the repository next.
+      ( sourcePath = "/",     # Then search the system root directory.
         hidePaths = [ "home", "proc", "sys",
                       "etc/passwd", "etc/hosts", "etc/host.conf",
                       "etc/nsswitch.conf", "etc/resolv.conf" ]
@@ -249,6 +244,8 @@ const pkgdef :Spk.PackageDefinition = (
   #  # this string, if specified.
   #),
 );
+
+const myExe :Text = "/app.stripped";
 
 const myEnviron :List(Util.KeyValue) = [
     # Note that this defines the *entire* environment seen by your app.

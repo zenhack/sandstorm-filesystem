@@ -20,27 +20,23 @@ $Go.import("zenhack.net/go/sandstorm-filesystem");
 interface Node @0x955400781a01b061 {
   # A node in the filesystem. This is either a file or a directory.
 
-  type @0 () -> (type :Type);
-  # Report the type of the node.
-
-  enum Type {
-    dir @0;
-    file @1;
-  }
-
-  canWrite @1 () -> (canWrite :Bool);
-  # Report whether the node is writable. If it is, it must implement
-  # one of the Rw* interfaces below.
+  stat @0 () -> (info :StatInfo);
+  # Report information about the node.
 }
 
-enum Whence {
-  start @0;
-  end @1;
+struct StatInfo {
+  union {
+    dir @0 :Void;
+    file :group {
+      size @1 :Int64;
+    }
+  }
+  executable @2 :Bool;
+  writable @3 :Bool;
 }
 
 interface Directory @0xce3039544779e0fc extends(Node) {
   # A (possibly read-only) directory.
-
 
   list @0 (stream :Entry.Stream) -> (cancel :Util.Handle);
   # List the contents of the directory. Entries are pushed into `stream`.
@@ -49,20 +45,14 @@ interface Directory @0xce3039544779e0fc extends(Node) {
   struct Entry {
     # Information about a child of a directory.
     name @0 :Text;
-    canWrite @1 :Bool;
-    node :union {
-      dir @2 :Void;
-      file :group {
-        isExec @3 :Bool;
-      }
-    }
+    info @1 :StatInfo;
 
     interface Stream {
+      # A stream of directories, for use with `list`, above.
       push @0 (entries :List(Entry));
       done @1 ();
     }
   }
-
 
   walk @1 (name :Text) -> (node :Node);
   # Open a file in this directory.
@@ -71,24 +61,21 @@ interface Directory @0xce3039544779e0fc extends(Node) {
 interface RwDirectory @0xdffe2836f5c5dffc extends(Directory) {
   # A directory, with write access.
 
-  create @0 (name :Text, isExec :Bool) -> (file :RwFile);
-  # Create a file named `name` in the current directory. `isExec`
-  # indicates whether the file should be executable.
+  create @0 (name :Text, executable :Bool) -> (file :RwFile);
+  # Create a file in the current directory.
 
-  mkDir @1 (name :Text) -> (dir :RwDirectory);
-  # Create a subdirectory named `name` in the current directory.
+  mkdir @1 (name :Text) -> (dir :RwDirectory);
+  # Create a sub-directory in the current directory.
 
   delete @2 (name :Text);
-  # Delete the node in this directory named `name`.
+  # Delete the node in this directory named `name`. If it is a directory,
+  # it must be empty.
 }
 
 interface File @0xaa5b133d60884bbd extends(Node) {
   # A regular file
 
-  size @0 () -> (size :UInt64);
-  # Return the size of the file.
-
-  read @1 (startAt :Int64, amount :UInt64, sink :Util.ByteStream)
+  read @0 (startAt :Int64, amount :UInt64, sink :Util.ByteStream)
     -> (cancel :Util.Handle);
   # Read `amount` bytes from the file into `sink`, starting at position
   # `startAt`. As a special case, if `amount` is 0, data will be read
@@ -99,9 +86,6 @@ interface File @0xaa5b133d60884bbd extends(Node) {
   #
   # Dropping the returned handle can be used to request that the transfer
   # be canceled.
-
-  isExec @2 () -> (isExec :Bool);
-  # Reports whether or not the file is executable.
 }
 
 interface RwFile @0xb4810121539f6e53 extends(File) {

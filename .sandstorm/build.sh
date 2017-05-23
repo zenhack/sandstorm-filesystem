@@ -29,6 +29,6 @@ export GOPATH=$HOME/go
 
 cd /opt/app
 go get -v -d ./...
-go build -v -i
+make
 
 exit 0
