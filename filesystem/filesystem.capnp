@@ -86,6 +86,9 @@ interface File @0xaa5b133d60884bbd extends(Node) {
   #
   # Dropping the returned handle can be used to request that the transfer
   # be canceled.
+  #
+  # `read` will not return until all of the data has been written into
+  # `sink` (or an error has occurred).
 }
 
 interface RwFile @0xb4810121539f6e53 extends(File) {
@@ -95,6 +98,7 @@ interface RwFile @0xb4810121539f6e53 extends(File) {
     -> (sink :Util.ByteStream);
   # Return a ByteStream that can be used to write data to the file.
   # Writing starts at offset `startAt`. `-1` denotes the end of the file.
+  # `cancel` may be used be the callee to request that streaming be stopped.
 
   truncate @1 (size :UInt64);
   # Truncate the file to `size` bytes.
