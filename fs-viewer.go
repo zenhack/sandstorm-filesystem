@@ -248,7 +248,7 @@ func initHTTPFS() {
 				return
 			}
 
-			sessionCtx := w.(grain.HasSessionContext).GetSessionContext()
+			sessionCtx := grain.GetSessionContext(req.Context())
 			results, err := sessionCtx.ClaimRequest(
 				context.TODO(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {
