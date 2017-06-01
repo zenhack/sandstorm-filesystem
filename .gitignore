@@ -7,3 +7,6 @@
 
 # The one in .sandstorm is authoritative:
 /sandstorm-files.list
+
+# This might show up if the user issues `go build`, without the Makefile:
+/sandstorm-filesystem
