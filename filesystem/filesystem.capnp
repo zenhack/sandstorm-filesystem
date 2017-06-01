@@ -15,7 +15,7 @@ using Util = import "/util.capnp";
 # install the go plugin:
 using Go = import "/go.capnp";
 $Go.package("filesystem");
-$Go.import("zenhack.net/go/sandstorm-filesystem");
+$Go.import("zenhack.net/go/sandstorm-filesystem/filesystem");
 
 interface Node @0x955400781a01b061 {
   # A node in the filesystem. This is either a file or a directory.
