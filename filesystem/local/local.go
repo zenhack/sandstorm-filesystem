@@ -212,7 +212,9 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 	}
 	file.Close()
 
-	p.Results.SetFile(filesystem.RwFile_ServerToClient(&node))
+	p.Results.SetFile(filesystem.RwFile{
+		Client: filesystem.PersistentRwFile_ServerToClient(&node).Client,
+	})
 	return nil
 }
 
@@ -235,15 +237,15 @@ func (n *Node) MakeClient() filesystem.Node {
 	var client capnp.Client
 	if n.isDir {
 		if n.writable {
-			client = filesystem.RwDirectory_ServerToClient(n).Client
+			client = filesystem.PersistentRwDirectory_ServerToClient(n).Client
 		} else {
-			client = filesystem.Directory_ServerToClient(n).Client
+			client = filesystem.PersistentDirectory_ServerToClient(n).Client
 		}
 	} else {
 		if n.writable {
-			client = filesystem.RwFile_ServerToClient(n).Client
+			client = filesystem.PersistentRwFile_ServerToClient(n).Client
 		} else {
-			client = filesystem.File_ServerToClient(n).Client
+			client = filesystem.PersistentFile_ServerToClient(n).Client
 		}
 	}
 	return filesystem.Node{Client: client}
