@@ -39,23 +39,24 @@ func getAction() string {
 }
 
 func main() {
-	var uiView grain_capnp.UiView_Server
+	ctx := context.Background()
 
 	action := getAction()
 
 	switch action {
 	case "localfs":
-		uiView = NewLocalFS()
+		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView{
+			Client: grain_capnp.MainView_ServerToClient(NewLocalFS()).Client,
+		})
+		chkfatal(err)
 	case "httpview":
 		initHTTPFS()
-		uiView = websession.FromHandler(http.DefaultServeMux)
+		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView_ServerToClient(
+			websession.FromHandler(http.DefaultServeMux),
+		))
+		chkfatal(err)
 	default:
 		panic("Unexpected action type: " + action)
-	}
-	ctx := context.Background()
-	_, err := grain.ConnectAPI(ctx, uiView)
-	if err != nil {
-		panic(err)
 	}
 	<-ctx.Done()
 }

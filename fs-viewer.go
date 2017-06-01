@@ -19,7 +19,7 @@ import (
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
 	util_capnp "zenhack.net/go/sandstorm/capnp/util"
-	"zenhack.net/go/sandstorm/grain"
+	grain_ctx "zenhack.net/go/sandstorm/grain/context"
 	"zenhack.net/go/sandstorm/util"
 )
 
@@ -248,7 +248,7 @@ func initHTTPFS() {
 				return
 			}
 
-			sessionCtx := grain.GetSessionContext(req.Context())
+			sessionCtx := grain_ctx.GetSessionContext(req.Context())
 			results, err := sessionCtx.ClaimRequest(
 				context.TODO(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {

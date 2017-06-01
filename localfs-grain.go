@@ -13,13 +13,26 @@ import (
 	"zombiezen.com/go/capnproto2/pogs"
 )
 
+type LocalFS struct {
+	grain_capnp.UiView_Server
+}
+
+func (fs *LocalFS) Restore(p grain_capnp.MainView_restore) error {
+	node := &local.Node{}
+	return node.Restore(p)
+}
+
+func (fs *LocalFS) Drop(p grain_capnp.MainView_drop) error {
+	return nil
+}
+
 // Returns a "local fs" grain, which allows other grains to access
 // its files.
-func NewLocalFS() grain_capnp.UiView_Server {
+func NewLocalFS() grain_capnp.MainView_Server {
 	// Make sure our shared directory exists.
 	chkfatal(os.MkdirAll("/var/shared-dir", 0700))
 
-	return websession.FromHandler(
+	return &LocalFS{websession.FromHandler(
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
 			p, err := grain_ctx.GetRequestSessionParams(ctx)
@@ -84,5 +97,5 @@ func NewLocalFS() grain_capnp.UiView_Server {
 				}}},
 			})
 			return nil
-		})
+		})}
 }
