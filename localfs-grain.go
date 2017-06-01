@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -31,6 +32,11 @@ func (fs *LocalFS) Drop(p grain_capnp.MainView_drop) error {
 func NewLocalFS() grain_capnp.MainView_Server {
 	// Make sure our shared directory exists.
 	chkfatal(os.MkdirAll("/var/shared-dir", 0700))
+
+	// Put something in the directory.
+	chkfatal(ioutil.WriteFile("/var/shared-dir/index.html", []byte(
+		"This is a directory shared by a sandstorm grain.",
+	), 0644))
 
 	return &LocalFS{websession.FromHandler(
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

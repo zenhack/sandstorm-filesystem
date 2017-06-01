@@ -31,18 +31,18 @@ func NewNode(path string) (*Node, error) {
 		return nil, err
 	}
 	return &Node{
-		path:       path,
-		isDir:      fi.IsDir(),
-		writable:   fi.Mode()&0200 != 0,
-		executable: fi.Mode()&0100 != 0,
+		Path:       path,
+		IsDir:      fi.IsDir(),
+		Writable:   fi.Mode()&0200 != 0,
+		Executable: fi.Mode()&0100 != 0,
 	}, nil
 }
 
 type Node struct {
-	isDir      bool
-	writable   bool
-	executable bool
-	path       string
+	IsDir      bool
+	Writable   bool
+	Executable bool
+	Path       string
 }
 
 func (n *Node) Save(p grain_capnp.AppPersistent_save) error {
@@ -73,23 +73,23 @@ func (n *Node) Restore(p grain_capnp.MainView_restore) error {
 }
 
 func (n *Node) Stat(p filesystem.Node_stat) error {
-	fi, err := os.Stat(n.path)
+	fi, err := os.Stat(n.Path)
 	if err != nil {
 		// TODO: think about the right way to handle this.
 		return err
 	}
-	info, err := p.Results.Info()
+	info, err := p.Results.NewInfo()
 	if err != nil {
 		return err
 	}
-	if n.isDir {
+	if n.IsDir {
 		info.SetDir()
 	} else {
 		info.SetFile()
 		info.File().SetSize(fi.Size())
 	}
-	info.SetWritable(n.writable)
-	info.SetExecutable(n.executable)
+	info.SetWritable(n.Writable)
+	info.SetExecutable(n.Executable)
 	return nil
 }
 
@@ -102,7 +102,7 @@ func (c cancelHandle) Close() error {
 
 func (d *Node) List(p filesystem.Directory_list) error {
 	stream := p.Params.Stream()
-	file, err := os.Open(d.path)
+	file, err := os.Open(d.Path)
 	if err != nil {
 		// err might contain private info, e.g. where the directory
 		// is rooted. So we return a generic error. It might be nice
@@ -143,7 +143,7 @@ func (d *Node) List(p filesystem.Directory_list) error {
 						// TODO FIXME: error reporting.
 						return err
 					}
-					info.SetWritable(d.writable && (fi.Mode()&0200 != 0))
+					info.SetWritable(d.Writable && (fi.Mode()&0200 != 0))
 					info.SetExecutable(fi.Mode()&0100 != 0)
 					if fi.IsDir() {
 						info.SetDir()
@@ -170,17 +170,17 @@ func (d *Node) Walk(p filesystem.Directory_walk) error {
 		return IllegalFileName
 	}
 
-	path := d.path + "/" + name
+	path := d.Path + "/" + name
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 
 	node := &Node{
-		path:       path,
-		isDir:      fi.IsDir(),
-		writable:   d.writable && fi.Mode()&0200 != 0,
-		executable: fi.Mode()&0100 != 0,
+		Path:       path,
+		IsDir:      fi.IsDir(),
+		Writable:   d.Writable && fi.Mode()&0200 != 0,
+		Executable: fi.Mode()&0100 != 0,
 	}
 
 	p.Results.SetNode(node.MakeClient())
@@ -197,17 +197,17 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 	}
 
 	node := Node{
-		path:       d.path + "/" + name,
-		executable: p.Params.Executable(),
-		writable:   true,
+		Path:       d.Path + "/" + name,
+		Executable: p.Params.Executable(),
+		Writable:   true,
 	}
 
 	mode := os.FileMode(0644)
-	if node.executable {
+	if node.Executable {
 		mode |= 0111
 	}
 
-	file, err := os.OpenFile(node.path, os.O_RDWR|os.O_CREATE, mode)
+	file, err := os.OpenFile(node.Path, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return OpenFailed
 	}
@@ -236,14 +236,14 @@ func validFileName(name string) bool {
 
 func (n *Node) MakeClient() filesystem.Node {
 	var methods []server.Method
-	if n.isDir {
-		if n.writable {
+	if n.IsDir {
+		if n.Writable {
 			methods = filesystem.RwDirectory_Methods(nil, n)
 		} else {
 			methods = filesystem.Directory_Methods(nil, n)
 		}
 	} else {
-		if n.writable {
+		if n.Writable {
 			methods = filesystem.RwFile_Methods(nil, n)
 		} else {
 			methods = filesystem.File_Methods(nil, n)
@@ -261,7 +261,7 @@ func (f *Node) Write(p filesystem.RwFile_write) error {
 		return InvalidArgument
 	}
 
-	file, err := os.OpenFile(f.path, os.O_WRONLY|os.O_APPEND, 0)
+	file, err := os.OpenFile(f.Path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return err
 	}
@@ -282,23 +282,23 @@ func (f *Node) Write(p filesystem.RwFile_write) error {
 
 func (f *Node) SetExec(p filesystem.RwFile_setExec) error {
 	exec := p.Params.Exec()
-	fi, err := os.Stat(f.path)
+	fi, err := os.Stat(f.Path)
 	// FIXME: censor error like with OpenFailed.
 	if err != nil {
 		return err
 	}
 	if exec {
 		// FIXME: censor error like with OpenFailed.
-		return os.Chmod(f.path, fi.Mode()|0111)
+		return os.Chmod(f.Path, fi.Mode()|0111)
 	} else {
 		// FIXME: censor error like with OpenFailed.
-		return os.Chmod(f.path, fi.Mode()&^0111)
+		return os.Chmod(f.Path, fi.Mode()&^0111)
 	}
 }
 
 func (f *Node) Truncate(p filesystem.RwFile_truncate) error {
 	// FIXME: cast/overflow issues.
-	if err := os.Truncate(f.path, int64(p.Params.Size())); err != nil {
+	if err := os.Truncate(f.Path, int64(p.Params.Size())); err != nil {
 		return OpenFailed
 	}
 	return nil
@@ -320,7 +320,7 @@ func (f *Node) Read(p filesystem.File_read) error {
 	}
 	sink := p.Params.Sink()
 
-	file, err := os.Open(f.path)
+	file, err := os.Open(f.Path)
 	if err != nil {
 		return OpenFailed
 	}

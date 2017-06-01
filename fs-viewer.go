@@ -181,11 +181,19 @@ func (fi *FileInfo) Sys() interface{} {
 
 func (fs *CapnpHTTPFileSystem) Open(name string) (http.File, error) {
 	parts := strings.Split(name, "/")
+	parts = parts[1:] // remove the empty string at the start
+	if len(parts) != 0 && parts[0] == "fs" {
+		// TODO(cleanup): This logic ought to go elsewhere.
+
+		// strip off the path prefix
+		parts = parts[1:]
+	}
 	toClose := make([]filesystem.Node, len(parts))
 
 	var node filesystem.Node
 	var dir filesystem.Directory
 	node = filesystem.Node{Client: fs.Dir.Client}
+	dir.Client = node.Client
 
 	for i, nodeName := range parts {
 		node = dir.Walk(context.TODO(), func(p filesystem.Directory_walk_Params) error {
@@ -195,8 +203,10 @@ func (fs *CapnpHTTPFileSystem) Open(name string) (http.File, error) {
 		toClose[i] = node
 		dir = filesystem.Directory{node.Client}
 	}
-	for i := range toClose[:len(toClose)-1] {
-		toClose[i].Client.Close()
+	if len(toClose) != 0 {
+		for i := range toClose[:len(toClose)-1] {
+			toClose[i].Client.Close()
+		}
 	}
 	ret, err := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
 		return nil
