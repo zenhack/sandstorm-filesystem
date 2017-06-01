@@ -15,6 +15,7 @@ import (
 	util_capnp "zenhack.net/go/sandstorm/capnp/util"
 	"zenhack.net/go/sandstorm/util"
 	"zombiezen.com/go/capnproto2"
+	"zombiezen.com/go/capnproto2/server"
 )
 
 var (
@@ -213,7 +214,7 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 	file.Close()
 
 	p.Results.SetFile(filesystem.RwFile{
-		Client: filesystem.PersistentRwFile_ServerToClient(&node).Client,
+		Client: node.MakeClient().Client,
 	})
 	return nil
 }
@@ -234,21 +235,23 @@ func validFileName(name string) bool {
 }
 
 func (n *Node) MakeClient() filesystem.Node {
-	var client capnp.Client
+	var methods []server.Method
 	if n.isDir {
 		if n.writable {
-			client = filesystem.PersistentRwDirectory_ServerToClient(n).Client
+			methods = filesystem.RwDirectory_Methods(nil, n)
 		} else {
-			client = filesystem.PersistentDirectory_ServerToClient(n).Client
+			methods = filesystem.Directory_Methods(nil, n)
 		}
 	} else {
 		if n.writable {
-			client = filesystem.PersistentRwFile_ServerToClient(n).Client
+			methods = filesystem.RwFile_Methods(nil, n)
 		} else {
-			client = filesystem.PersistentFile_ServerToClient(n).Client
+			methods = filesystem.File_Methods(nil, n)
 		}
 	}
-	return filesystem.Node{Client: client}
+	return filesystem.Node{
+		Client: server.New(append(methods, grain_capnp.AppPersistent_Methods(nil, n)...), nil),
+	}
 }
 
 func (f *Node) Write(p filesystem.RwFile_write) error {
