@@ -250,7 +250,29 @@ func (n *Node) MakeClient() filesystem.Node {
 }
 
 func (f *Node) Write(p filesystem.RwFile_write) error {
-	return NotImplemented
+	startAt := p.Params.StartAt()
+
+	if startAt <= -2 {
+		return InvalidArgument
+	}
+
+	file, err := os.OpenFile(f.path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	if startAt == -1 {
+		_, err = file.Seek(0, 2)
+	} else {
+		_, err = file.Seek(startAt, 0)
+	}
+	if err != nil {
+		return err
+	}
+	bs := util_capnp.ByteStream_ServerToClient(&util.WriteCloserByteStream{
+		WC: file,
+	})
+	p.Results.SetSink(bs)
+	return nil
 }
 
 func (f *Node) SetExec(p filesystem.RwFile_setExec) error {
