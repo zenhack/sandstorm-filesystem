@@ -67,23 +67,51 @@ func (l *LocalFS) NewSession(p grain_capnp.UiView_newSession) error {
 }
 
 func (l *LocalFS) NewRequestSession(p grain_capnp.UiView_newRequestSession) error {
+	println("NewRquestSession()")
 	sessionContext := p.Params.Context()
-	sessionContext.FulfillRequest(
-		p.Ctx,
-		func(p grain_capnp.SessionContext_fulfillRequest_Params) error {
-			// TODO: limit to the thing the user actually asked for; if they didn't ask
-			// for write, don't give it to them.
-			n, err := local.NewNode("/var/shared-dir")
-			if err != nil {
-				// This should never happen; we create the above dir on first start.
-				panic(err)
-			}
-			capId := p.Struct.Segment().Message().AddCap(n.MakeClient().Client)
-			p.SetCapPtr(capnp.NewInterface(p.Struct.Segment(), capId).ToPtr())
-			return nil
-		})
-	sessionContext.Close(p.Ctx, func(p grain_capnp.SessionContext_close_Params) error {
-		return nil
+	requestInfo, err := p.Params.RequestInfo()
+	if err != nil {
+		return err
+	}
+	if requestInfo.Len() < 1 {
+		return NoPowerboxDescriptors
+	}
+	descriptor := requestInfo.At(0)
+	p.Results.SetSession(grain_capnp.UiSession{
+		websession_capnp.WebSession_ServerToClient(websession.FromHandler(
+			http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				sessionContext.FulfillRequest(
+					p.Ctx,
+					func(p grain_capnp.SessionContext_fulfillRequest_Params) error {
+						println("FulfillRequest()")
+						// TODO: limit to the thing the user actually asked for; if they didn't ask
+						// for write, don't give it to them.
+						n, err := local.NewNode("/var/shared-dir")
+						if err != nil {
+							// This should never happen; we create the above dir on first start.
+							panic(err)
+						}
+						capId := p.Struct.Segment().Message().AddCap(n.MakeClient().Client)
+						p.SetCapPtr(capnp.NewInterface(p.Struct.Segment(), capId).ToPtr())
+						p.SetDescriptor(descriptor)
+						p.NewRequiredPermissions(0)
+						displayInfo, err := p.NewDisplayInfo()
+						if err != nil {
+							return err
+						}
+						title, err := displayInfo.NewTitle()
+						if err != nil {
+							return err
+						}
+						title.SetDefaultText("Grain-local filesystem.")
+						return nil
+					})
+				w.Write([]byte("RequestSession"))
+				sessionContext.Close(p.Ctx, func(p grain_capnp.SessionContext_close_Params) error {
+					return nil
+				})
+			}),
+		)).Client,
 	})
 	return nil
 }

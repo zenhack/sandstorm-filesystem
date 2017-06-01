@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
 		window.parent.postMessage({powerboxRequest: {
 			rpcId: 0,
 			// encoded contents of ../ro-dir-powerbox-request.capnp:
-			['EAZQAQEAABEBF1EEAQH__OB5R1Q5MM4AAAA'],
+			query: ['EAZQAQEAABEBF1EEAQH__OB5R1Q5MM4AAAA'],
 		}}, "*");
 	});
 });

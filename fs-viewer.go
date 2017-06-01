@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
@@ -28,6 +29,8 @@ var (
 	rootDir *CapnpHTTPFileSystem
 
 	InvalidArgument = errors.New("Invalid argument")
+
+	tpls = template.Must(template.ParseGlob("templates/*.html"))
 )
 
 type CapnpHTTPFileSystem struct {
@@ -266,10 +269,24 @@ func initHTTPFS() {
 			}}
 		})
 
+	r.Methods("GET").Path("/").
+		HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			tpls.ExecuteTemplate(w, "fs-viewer-index.html", struct{ HaveFS bool }{
+				rootDir != nil,
+			})
+		})
+
 	r.Methods("GET").PathPrefix("/fs/").
 		HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-
+			if rootDir == nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			http.FileServer(rootDir).ServeHTTP(w, req)
 		})
+
+	r.Methods("GET").PathPrefix("/static/").
+		Handler(http.FileServer(http.Dir("")))
 
 	http.Handle("/", withLock(r))
 }
