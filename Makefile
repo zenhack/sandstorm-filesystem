@@ -15,8 +15,8 @@ app.debug: app
 
 SANDSTORM_HOME ?= $(HOME)/src/foreign/sandstorm
 
-ro-dir-powerbox-request.base64: ro-dir-powerbox-request.capnp
-	python2 encode_powerbox_request.py $(SANDSTORM_HOME) > $@
+%-powerbox-request.base64: %-powerbox-request.capnp
+	python2 encode_powerbox_request.py $(SANDSTORM_HOME) $< > $@
 
 # App is declared as PHONY because (1) go build manages most of the dependency
 # tracking, and (2) it's a pain to get make to find all of the deps, so

@@ -24,8 +24,13 @@ document.addEventListener('DOMContentLoaded', function() {
 		});
 		window.parent.postMessage({powerboxRequest: {
 			rpcId: 0,
-			// encoded contents of ../ro-dir-powerbox-request.capnp:
-			query: ['EAZQAQEAABEBF1EEAQH__OB5R1Q5MM4AAAA'],
+			// encoded contents of ../rw-dir-powerbox-request.capnp:
+			query: ['EAZQAQEAABEBF1EEAQH__N_F9TYo_t8AAAA'],
+			//// Note that we could do this:
+			// query: ['EAZQAQEAABEBF1EEAQH__OB5R1Q5MM4AAAA'],
+			//// ..for a read-only directory. but for demo purposes
+			//// it's convienent to be able to use this script in both
+			//// grain types.
 		}}, "*");
 	});
 });

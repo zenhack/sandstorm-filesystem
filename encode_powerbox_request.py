@@ -4,8 +4,9 @@ import subprocess
 import sys
 
 sandstorm_repo = sys.argv[1]
+schema_file = sys.argv[2]
 
-with open('ro-dir-powerbox-request.capnp') as f:
+with open(schema_file) as f:
     proc = subprocess.Popen(['capnp', 'encode', '-p',
                              os.path.join(sandstorm_repo,
                                           'src/sandstorm/powerbox.capnp'),
