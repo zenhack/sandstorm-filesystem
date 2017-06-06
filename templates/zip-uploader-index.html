@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Sandstorm Filesystem Viewer</title>
+		<script src="static/pb-request.js"></script>
+	</head>
+	<body>
+		<h1>Sandstorm Filesystem Zip Uploader</h1>
+
+		<ul>
+			<li><button id="request-btn">Request Filesystem</button></li>
+			{{- if .HaveFS -}}
+			<form method="POST" action="/zipfile" enctype="multipart/form-data">
+				<input type="file" name="zipfile"></input>
+				<button type="submit">Upload</button>
+			</form>
+			{{- end }}
+		</ul>
+	</body>
+</html>

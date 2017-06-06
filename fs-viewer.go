@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -24,13 +22,9 @@ import (
 )
 
 var (
-	lck sync.Mutex
-
 	rootDir *CapnpHTTPFileSystem
 
 	InvalidArgument = errors.New("Invalid argument")
-
-	tpls = template.Must(template.ParseGlob("templates/*.html"))
 )
 
 type CapnpHTTPFileSystem struct {
@@ -231,14 +225,6 @@ func (fs *CapnpHTTPFileSystem) Open(name string) (http.File, error) {
 			info: info,
 		},
 	}, nil
-}
-
-func withLock(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		lck.Lock()
-		defer lck.Unlock()
-		h.ServeHTTP(w, req)
-	})
 }
 
 func initHTTPFS() {

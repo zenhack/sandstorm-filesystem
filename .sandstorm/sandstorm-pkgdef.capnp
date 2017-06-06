@@ -40,6 +40,12 @@ const pkgdef :Spk.PackageDefinition = (
           environ = .myEnviron,
         ),
       ),
+      ( nounPhrase = (defaultText = "ZipFile uploader"),
+        command = (
+          argv = [.myExe, "zip-uploader"],
+          environ = .myEnviron,
+        ),
+      ),
     ],
 
     continueCommand = (

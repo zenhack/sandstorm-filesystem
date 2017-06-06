@@ -93,13 +93,6 @@ func (n *Node) Stat(p filesystem.Node_stat) error {
 	return nil
 }
 
-type cancelHandle context.CancelFunc
-
-func (c cancelHandle) Close() error {
-	c()
-	return nil
-}
-
 func (d *Node) List(p filesystem.Directory_list) error {
 	stream := p.Params.Stream()
 	file, err := os.Open(d.Path)
@@ -110,7 +103,7 @@ func (d *Node) List(p filesystem.Directory_list) error {
 		return OpenFailed
 	}
 	ctx, cancel := context.WithCancel(p.Ctx)
-	p.Results.SetCancel(util_capnp.Handle_ServerToClient(cancelHandle(cancel)))
+	p.Results.SetCancel(util_capnp.Handle_ServerToClient(util.CancelHandle(cancel)))
 	go func() {
 		defer file.Close()
 		defer stream.Done(ctx, func(filesystem.Directory_Entry_Stream_done_Params) error {
@@ -326,7 +319,7 @@ func (f *Node) Read(p filesystem.File_read) error {
 	}
 
 	ctx, cancel := context.WithCancel(p.Ctx)
-	p.Results.SetCancel(util_capnp.Handle_ServerToClient(cancelHandle(cancel)))
+	p.Results.SetCancel(util_capnp.Handle_ServerToClient(util.CancelHandle(cancel)))
 
 	go func() {
 		defer file.Close()

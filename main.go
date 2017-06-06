@@ -55,6 +55,12 @@ func main() {
 			websession.FromHandler(http.DefaultServeMux),
 		))
 		chkfatal(err)
+	case "zip-uploader":
+		initZipUploader()
+		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView_ServerToClient(
+			websession.FromHandler(http.DefaultServeMux),
+		))
+		chkfatal(err)
 	default:
 		panic("Unexpected action type: " + action)
 	}
