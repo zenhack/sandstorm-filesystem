@@ -131,6 +131,8 @@ func initZipUploader() {
 					return
 				}
 			}
+			w.Header().Set("Location", "/")
+			w.WriteHeader(http.StatusSeeOther)
 		})
 
 	r.Methods("GET").PathPrefix("/static/").
