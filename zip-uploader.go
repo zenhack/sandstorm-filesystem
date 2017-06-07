@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"zombiezen.com/go/capnproto2"
@@ -97,8 +98,33 @@ func initZipUploader() {
 			}
 			for _, f := range r.File {
 				if f.FileInfo().IsDir() {
-					// TODO: handle directories
+					// This hasn't happened in my(zenhack) experimentation, but
+					// I don't understand the zip format well enough to know if
+					// it could. We skip directories just in case. They seem to
+					// normally be encoded as files with parent dirs as part of
+					// their name.
 					continue
+				}
+				rwDir := rootRwDir
+				parts := strings.Split(f.Name, "/")
+				if len(parts) > 1 {
+					for _, part := range parts[:len(parts)-1] {
+						// Mkdir might fail if the directory already exists, so
+						// instead of using its return value, we just make
+						// another call to walk afterwards.
+						rwDir.Mkdir(
+							req.Context(),
+							func(p filesystem.RwDirectory_mkdir_Params) error {
+								p.SetName(part)
+								return nil
+							}).Dir()
+						rwDir.Client = rwDir.Walk(
+							req.Context(),
+							func(p filesystem.Directory_walk_Params) error {
+								p.SetName(part)
+								return nil
+							}).Node().Client
+					}
 				}
 				file, err := f.Open()
 				if err != nil {
@@ -106,7 +132,7 @@ func initZipUploader() {
 					return
 				}
 				ctx, cancel := context.WithCancel(req.Context())
-				out := rootRwDir.Create(
+				out := rwDir.Create(
 					ctx,
 					func(p filesystem.RwDirectory_create_Params) error {
 						p.SetName(f.Name)

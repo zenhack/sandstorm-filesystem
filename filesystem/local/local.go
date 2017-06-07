@@ -213,7 +213,14 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 }
 
 func (d *Node) Mkdir(p filesystem.RwDirectory_mkdir) error {
-	return NotImplemented
+	name, err := p.Params.Name()
+	if err != nil {
+		return err
+	}
+	if !validFileName(name) {
+		return IllegalFileName
+	}
+	return os.Mkdir(d.Path+"/"+name, 0700)
 }
 
 func (d *Node) Delete(p filesystem.RwDirectory_delete) error {
