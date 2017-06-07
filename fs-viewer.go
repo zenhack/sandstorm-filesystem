@@ -39,7 +39,8 @@ type CapnpHTTPFile struct {
 }
 
 func (f *CapnpHTTPFile) Close() error {
-	return f.Node.Client.Close()
+	//	return f.Node.Client.Close()
+	return nil
 }
 
 func (f *CapnpHTTPFile) Read(buf []byte) (n int, err error) {
@@ -197,11 +198,13 @@ func (fs *CapnpHTTPFileSystem) Open(name string) (http.File, error) {
 		toClose[i] = node
 		dir = filesystem.Directory{node.Client}
 	}
-	if len(toClose) != 0 {
-		for i := range toClose[:len(toClose)-1] {
-			toClose[i].Client.Close()
+	/*
+		if len(toClose) != 0 {
+			for i := range toClose[:len(toClose)-1] {
+				toClose[i].Client.Close()
+			}
 		}
-	}
+	*/
 	ret, err := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
 		return nil
 	}).Struct()
