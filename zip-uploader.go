@@ -90,7 +90,7 @@ func initZipUploader() {
 				badReq(err.Error())
 				return
 			}
-			r, err := zip.NewReader(bytes.NewReader(buf.Bytes()), 0)
+			r, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
 			if err != nil {
 				badReq(err.Error())
 				return
