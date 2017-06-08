@@ -40,8 +40,9 @@ func NewLocalFS() grain_capnp.MainView_Server {
 				// Not a request session.
 				w.Write([]byte("This grain doesn't provide much of a user " +
 					"interface (this is it), but you can request a " +
-					"filesystem via other apps, and have this grain " +
-					"fulfill them."))
+					"filesystem via other grains, and have this grain " +
+					"fulfill them. Try out the zip uploader and filesystem " +
+					"viewer grain types from this app."))
 				return
 			}
 			sessionContext := p.Context()

@@ -8,6 +8,11 @@
 	<body>
 		<h1>Sandstorm Filesystem Zip Uploader</h1>
 
+		<p>This grain accepts zip files, unpacking them into a filesystem provided
+		by another grain. Click "Request filesystem" to request a filesystem, then
+		upload a zip file. Use the filesystem viewer grain to have a look at the
+		results.</p>
+
 		<ul>
 			<li><button id="request-btn">Request Filesystem</button></li>
 			{{- if .HaveFS -}}
