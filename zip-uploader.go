@@ -15,7 +15,6 @@ import (
 
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
-	util_capnp "zenhack.net/go/sandstorm/capnp/util"
 	grain_ctx "zenhack.net/go/sandstorm/grain/context"
 	"zenhack.net/go/sandstorm/util"
 )
@@ -71,6 +70,7 @@ func initZipUploader() {
 
 	r.Methods("POST").Path("/zipfile").
 		HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			badReq := func(s string) {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(s))
@@ -113,13 +113,13 @@ func initZipUploader() {
 						// instead of using its return value, we just make
 						// another call to walk afterwards.
 						rwDir.Mkdir(
-							req.Context(),
+							ctx,
 							func(p filesystem.RwDirectory_mkdir_Params) error {
 								p.SetName(part)
 								return nil
 							}).Dir()
 						rwDir.Client = rwDir.Walk(
-							req.Context(),
+							ctx,
 							func(p filesystem.Directory_walk_Params) error {
 								p.SetName(part)
 								return nil
@@ -131,7 +131,6 @@ func initZipUploader() {
 					badReq(err.Error())
 					return
 				}
-				ctx, cancel := context.WithCancel(req.Context())
 				out := rwDir.Create(
 					ctx,
 					func(p filesystem.RwDirectory_create_Params) error {
@@ -142,7 +141,6 @@ func initZipUploader() {
 					ctx,
 					func(p filesystem.RwFile_write_Params) error {
 						p.SetStartAt(0)
-						p.SetCancel(util_capnp.Handle_ServerToClient(cancel))
 						return nil
 					}).Sink()
 				wc := &util.ByteStreamWriteCloser{

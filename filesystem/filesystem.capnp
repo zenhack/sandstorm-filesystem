@@ -38,9 +38,11 @@ struct StatInfo {
 interface Directory @0xce3039544779e0fc extends(Node) {
   # A (possibly read-only) directory.
 
-  list @0 (stream :Entry.Stream) -> (cancel :Util.Handle);
+  list @0 (stream :Entry.Stream);
   # List the contents of the directory. Entries are pushed into `stream`.
-  # The returned handle may be dropped to request canceling the stream.
+  #
+  # `list` will not return until all of the entries have been pushed into
+  # `stream` (or an error has occurred).
 
   struct Entry {
     # Information about a child of a directory.
@@ -75,17 +77,13 @@ interface RwDirectory @0xdffe2836f5c5dffc extends(Directory) {
 interface File @0xaa5b133d60884bbd extends(Node) {
   # A regular file
 
-  read @0 (startAt :Int64, amount :UInt64, sink :Util.ByteStream)
-    -> (cancel :Util.Handle);
+  read @0 (startAt :Int64, amount :UInt64, sink :Util.ByteStream);
   # Read `amount` bytes from the file into `sink`, starting at position
   # `startAt`. As a special case, if `amount` is 0, data will be read
   # until the end of the file is reached.
   #
   # If there are fewer than `amount` bytes, available, data will be read
   # until the end of the file.
-  #
-  # Dropping the returned handle can be used to request that the transfer
-  # be canceled.
   #
   # `read` will not return until all of the data has been written into
   # `sink` (or an error has occurred).
@@ -94,11 +92,9 @@ interface File @0xaa5b133d60884bbd extends(Node) {
 interface RwFile @0xb4810121539f6e53 extends(File) {
   # A file, with write access.
 
-  write @0 (startAt :Int64, cancel :Util.Handle)
-    -> (sink :Util.ByteStream);
+  write @0 (startAt :Int64) -> (sink :Util.ByteStream);
   # Return a ByteStream that can be used to write data to the file.
   # Writing starts at offset `startAt`. `-1` denotes the end of the file.
-  # `cancel` may be used be the callee to request that streaming be stopped.
 
   truncate @1 (size :UInt64);
   # Truncate the file to `size` bytes.

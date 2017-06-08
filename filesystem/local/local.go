@@ -3,7 +3,6 @@
 package local
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -102,54 +101,49 @@ func (d *Node) List(p filesystem.Directory_list) error {
 		// to find some way to allow more information for debugging.
 		return OpenFailed
 	}
-	ctx, cancel := context.WithCancel(p.Ctx)
-	p.Results.SetCancel(util_capnp.Handle_ServerToClient(util.CancelHandle(cancel)))
-	go func() {
-		defer file.Close()
-		defer stream.Done(ctx, func(filesystem.Directory_Entry_Stream_done_Params) error {
-			return nil
-		})
+	defer file.Close()
+	maxBufSize := 1024
 
-		maxBufSize := 1024
+	for p.Ctx.Err() == nil {
+		fis, err := file.Readdir(maxBufSize)
+		if err != nil && err != io.EOF {
+			return err
+		}
 
-		for ctx.Err() == nil {
-			fis, err := file.Readdir(maxBufSize)
+		stream.Push(p.Ctx, func(p filesystem.Directory_Entry_Stream_push_Params) error {
+			list, err := p.NewEntries(int32(len(fis)))
 			if err != nil {
-				// TODO: can we communicate failures somehow? This
-				// could mean EOF or a legitmate problem, but we don't
-				// currently have a good way to convey the latter to the
-				// caller
-				return
+				return err
 			}
-
-			stream.Push(ctx, func(p filesystem.Directory_Entry_Stream_push_Params) error {
-				list, err := p.NewEntries(int32(len(fis)))
+			for i := range fis {
+				fi := fis[i]
+				ent := list.At(i)
+				ent.SetName(fi.Name())
+				info, err := ent.NewInfo()
 				if err != nil {
 					return err
 				}
-				for i := range fis {
-					fi := fis[i]
-					ent := list.At(i)
-					ent.SetName(fi.Name())
-					info, err := ent.Info()
-					if err != nil {
-						// TODO FIXME: error reporting.
-						return err
-					}
-					info.SetWritable(d.Writable && (fi.Mode()&0200 != 0))
-					info.SetExecutable(fi.Mode()&0100 != 0)
-					if fi.IsDir() {
-						info.SetDir()
-					} else {
-						info.SetFile()
-						info.File().SetSize(fi.Size())
-					}
+				info.SetWritable(d.Writable && (fi.Mode()&0200 != 0))
+				info.SetExecutable(fi.Mode()&0100 != 0)
+				if fi.IsDir() {
+					info.SetDir()
+				} else {
+					info.SetFile()
+					info.File().SetSize(fi.Size())
 				}
-				return nil
-			})
-		}
+			}
+			return nil
+		})
 
-	}()
+		if err == io.EOF {
+			break
+		}
+	}
+
+	stream.Done(p.Ctx, func(filesystem.Directory_Entry_Stream_done_Params) error {
+		return nil
+	})
+
 	return nil
 }
 
@@ -324,23 +318,21 @@ func (f *Node) Read(p filesystem.File_read) error {
 	if err != nil {
 		return OpenFailed
 	}
+	defer file.Close()
 
-	ctx, cancel := context.WithCancel(p.Ctx)
-	p.Results.SetCancel(util_capnp.Handle_ServerToClient(util.CancelHandle(cancel)))
-
-	go func() {
-		defer file.Close()
-		wc := util.ByteStreamWriteCloser{ctx, sink}
-		defer wc.Close()
-		_, err := file.Seek(startAt, 0)
-		r := io.Reader(file)
-		if amount != 0 {
-			r = io.LimitReader(r, amount)
-		}
-		if err != nil {
-			return
-		}
-		io.Copy(wc, r)
-	}()
+	wc := util.ByteStreamWriteCloser{p.Ctx, sink}
+	_, err = file.Seek(startAt, 0)
+	r := io.Reader(file)
+	if amount != 0 {
+		r = io.LimitReader(r, amount)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(wc, r)
+	if err != nil {
+		return err
+	}
+	wc.Close()
 	return nil
 }
