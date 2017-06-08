@@ -25,6 +25,7 @@ var (
 	rootDir *CapnpHTTPFileSystem
 
 	InvalidArgument = errors.New("Invalid argument")
+	TooManyEntries  = errors.New("Stream received too many entries")
 )
 
 type CapnpHTTPFileSystem struct {
@@ -97,18 +98,56 @@ type fiStream struct {
 	have     int
 	buf      []os.FileInfo
 	done     chan struct{}
+	err      error
 }
 
-func (s *fiStream) Done(p filesystem.Directory_Entry_Stream) {
+func (s *fiStream) Close() error {
 	if !s.isClosed {
 		s.isClosed = true
-		s.buf = s.buf[:s.have]
+		s.err = io.ErrUnexpectedEOF
 		s.done <- struct{}{}
 	}
+	return nil
 }
 
-func (s *fiStream) Push(p filesystem.Directory_Entry_Stream) error {
-	// TODO: implement
+func (s *fiStream) Done(p filesystem.Directory_Entry_Stream_done) error {
+	if !s.isClosed {
+		s.isClosed = true
+		s.done <- struct{}{}
+	}
+	return nil
+}
+
+func (s *fiStream) Push(p filesystem.Directory_Entry_Stream_push) error {
+	if s.isClosed {
+		return s.err
+	}
+	entries, err := p.Params.Entries()
+	if err != nil {
+		return err
+	}
+	if s.limit && cap(s.buf)-s.have < entries.Len() {
+		s.err = TooManyEntries
+		s.isClosed = true
+		s.done <- struct{}{}
+		return s.err
+	}
+	for i := 0; i < entries.Len(); i++ {
+		entry := entries.At(i)
+		name, err := entry.Name()
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		s.buf = append(s.buf, &FileInfo{
+			name: name,
+			info: info,
+		})
+		s.have++
+	}
 	return nil
 }
 
@@ -116,17 +155,23 @@ func (f *CapnpHTTPFile) Readdir(count int) ([]os.FileInfo, error) {
 	if !f.Info.IsDir() {
 		return nil, InvalidArgument
 	}
-	//dir := filesystem.Directory{Client: f.Node.Client}
 	ret := &fiStream{
 		buf:  []os.FileInfo{},
-		done: make(chan struct{}),
+		done: make(chan struct{}, 1),
 	}
 	if count > 0 {
-		ret.buf = make([]os.FileInfo, count)
+		ret.buf = make([]os.FileInfo, 0, count)
 		ret.limit = true
 	}
-	// TODO: finish
-	return nil, nil
+	// FIXME: the remote could very easily cause us to hang here.
+	filesystem.Directory{Client: f.Node.Client}.List(
+		context.TODO(),
+		func(p filesystem.Directory_list_Params) error {
+			p.SetStream(filesystem.Directory_Entry_Stream_ServerToClient(ret))
+			return nil
+		})
+	<-ret.done
+	return ret.buf, ret.err
 }
 
 type FileInfo struct {
