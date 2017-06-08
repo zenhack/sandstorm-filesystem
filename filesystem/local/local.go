@@ -265,6 +265,7 @@ func (f *Node) Write(p filesystem.RwFile_write) error {
 		_, err = file.Seek(startAt, 0)
 	}
 	if err != nil {
+		file.Close()
 		return err
 	}
 	bs := util_capnp.ByteStream_ServerToClient(&util.WriteCloserByteStream{
