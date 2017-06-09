@@ -1,4 +1,3 @@
-*.capnp.go
 *.swp
 /app
 /app.debug
