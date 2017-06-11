@@ -9,6 +9,16 @@
 # NOTE: this is *unstable*. Backwards-incompatible changes may be made to this
 # schema until we settle on a final-ish design.
 
+# General notes:
+#
+# * All file names that appear in the API are *single* path segments --
+#   implementations of these interfaces must not interpret multi-part paths,
+#   and must throw exceptions when given filenames containing slashes.
+# * The filenames "", "." and ".." are illegal, and implementations must
+#   throw an exception if given one of these. Note that ".." in particular
+#   is very capability-unfriendly; traversing to a parent directory is very
+#   purposfully not facilitated by the API.
+
 using Util = import "/util.capnp";
 
 # Note to non go users: you can just delete this if you don't want to
