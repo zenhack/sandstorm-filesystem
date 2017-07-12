@@ -1,11 +1,13 @@
 
+GOPATH ?= $(HOME)/go
+
 all: app.stripped app.debug
 clean:
 	rm -f app app.stripped app.debug
 dev: all
 	spk dev -p .sandstorm/sandstorm-pkgdef.capnp:pkgdef
 
-app:
+app: pb-requests.capnp.go
 	go build -v -i -o app
 app.stripped: app app.debug
 	strip app -o app.stripped
@@ -13,10 +15,11 @@ app.stripped: app app.debug
 app.debug: app
 	objcopy --only-keep-debug app app.debug
 
-SANDSTORM_HOME ?= $(HOME)/src/foreign/sandstorm
-
-%-powerbox-request.base64: %-powerbox-request.capnp
-	python2 encode_powerbox_request.py $(SANDSTORM_HOME) $< > $@
+pb-requests.capnp.go: pb-requests.capnp
+	capnp compile -ogo \
+		-I $(GOPATH)/src/zombiezen.com/go/capnproto2/std \
+		-I $(GOPATH)/src/zenhack.net/go/sandstorm/capnp \
+		$<
 
 # App is declared as PHONY because (1) go build manages most of the dependency
 # tracking, and (2) it's a pain to get make to find all of the deps, so

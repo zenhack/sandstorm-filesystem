@@ -74,8 +74,8 @@ func initHTTPFS() {
 			http.FileServer(rootDir).ServeHTTP(w, req)
 		})
 
-	r.Methods("GET").PathPrefix("/static/").
-		Handler(http.FileServer(http.Dir("")))
+	r.Methods("GET").Path("/pb-request.js").
+		Handler(PbRequest(DirectoryReq))
 
 	http.Handle("/", withLock(r))
 }

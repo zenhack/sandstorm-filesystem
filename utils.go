@@ -8,7 +8,7 @@ import (
 
 var (
 	lck  sync.Mutex
-	tpls = template.Must(template.ParseGlob("templates/*.html"))
+	tpls = template.Must(template.ParseGlob("templates/*"))
 )
 
 func withLock(h http.Handler) http.Handler {

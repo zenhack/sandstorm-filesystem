@@ -159,8 +159,8 @@ func initZipUploader() {
 			w.WriteHeader(http.StatusSeeOther)
 		})
 
-	r.Methods("GET").PathPrefix("/static/").
-		Handler(http.FileServer(http.Dir("")))
+	r.Methods("GET").Path("/pb-request.js").
+		Handler(PbRequest(RwDirectoryReq))
 
 	http.Handle("/", withLock(r))
 }

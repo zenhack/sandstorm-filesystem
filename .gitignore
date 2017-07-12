@@ -2,7 +2,6 @@
 /app
 /app.debug
 /app.stripped
-*.base64
 
 # The one in .sandstorm is authoritative:
 /sandstorm-files.list
