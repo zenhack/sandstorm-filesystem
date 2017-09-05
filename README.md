@@ -10,7 +10,8 @@ allow one another access to files.
 ## What
 
 This repo contains a work-in-progress schema that can be requested &
-offered via the powerbox, plus some example apps.
+offered via the powerbox, plus some example apps. See [this mailing list
+post][1] for more information.
 
 ## License
 
@@ -26,3 +27,5 @@ errors and how to get around them:
     - treatment: `go get`
   - symptoms: `package zenhack.net/go/sandstorm-filesystem/filesystem: unrecognized import path` ...
     - treatment: make sure your source lives at `$GOPATH/src/zenhack.net/go/sandstorm-filesystem`
+
+[1]: https://groups.google.com/forum/#!searchin/sandstorm-dev/sandstorm-filesystem%7Csort:relevance/sandstorm-dev/sjEldWXrAjc/zjNGGdMpCAAJ
