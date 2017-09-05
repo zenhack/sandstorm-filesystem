@@ -17,6 +17,15 @@ post][1] for more information.
 
 Apache 2.0
 
+## Building
+
+You can just do the usual vagrant-spk dance, or if you want to use a
+local dev server (not vagrant-spk), make sure you have a go toolchain
+installed and do:
+
+    go get -d
+    make dev
+
 ## Troubleshooting
 
 The Makefile is a fairly simple wrapper around Go's default build
