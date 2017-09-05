@@ -18,6 +18,10 @@ Apache 2.0
 
 ## Troubleshooting
 
+The Makefile is a fairly simple wrapper around Go's default build
+system. For sandstorm folks less familiar with Go, here are a few common
+errors and how to get around them:
+
   - symptoms: `make` responds with `cannot find package "github.com/gorilla/mux"`
     - treatment: `go get`
   - symptoms: `package zenhack.net/go/sandstorm-filesystem/filesystem: unrecognized import path` ...
