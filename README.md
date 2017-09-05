@@ -15,3 +15,10 @@ offered via the powerbox, plus some example apps.
 ## License
 
 Apache 2.0
+
+## Troubleshooting
+
+  - symptoms: `make` responds with `cannot find package "github.com/gorilla/mux"`
+    - treatment: `go get`
+  - symptoms: `package zenhack.net/go/sandstorm-filesystem/filesystem: unrecognized import path` ...
+    - treatment: make sure your source lives at `$GOPATH/src/zenhack.net/go/sandstorm-filesystem`
