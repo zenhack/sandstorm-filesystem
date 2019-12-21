@@ -3,12 +3,9 @@ package main
 import (
 	"context"
 	"io/ioutil"
-	"net/http"
 	"os"
-	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
-	//ws_capnp "zenhack.net/go/sandstorm/capnp/websession"
-	"zenhack.net/go/sandstorm/grain"
-	"zenhack.net/go/sandstorm/websession"
+
+	"zenhack.net/go/sandstorm/exp/websession"
 )
 
 func chkfatal(err error) {
@@ -45,24 +42,14 @@ func main() {
 
 	switch action {
 	case "localfs":
-		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView{
-			Client: grain_capnp.MainView_ServerToClient(NewLocalFS()).Client,
-		})
-		chkfatal(err)
+		initLocalFS()
+		panic(websession.ListenAndServe(ctx, NewLocalFS(), nil))
 	case "httpview":
 		initHTTPFS()
-		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView_ServerToClient(
-			websession.FromHandler(http.DefaultServeMux),
-		))
-		chkfatal(err)
 	case "zip-uploader":
 		initZipUploader()
-		_, err := grain.ConnectAPI(ctx, grain_capnp.UiView_ServerToClient(
-			websession.FromHandler(http.DefaultServeMux),
-		))
-		chkfatal(err)
 	default:
 		panic("Unexpected action type: " + action)
 	}
-	<-ctx.Done()
+	panic(websession.ListenAndServe(nil, nil, nil))
 }

@@ -11,12 +11,13 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"zombiezen.com/go/capnproto2"
 
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
+
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
 	grain_ctx "zenhack.net/go/sandstorm/grain/context"
-	"zenhack.net/go/sandstorm/util"
+
+	"zenhack.net/go/sandstorm/exp/util/bytestream"
 )
 
 var (
@@ -41,12 +42,14 @@ func initZipUploader() {
 			}
 
 			sessionCtx := grain_ctx.GetSessionContext(req.Context())
-			results, err := sessionCtx.ClaimRequest(
+			res, release := sessionCtx.ClaimRequest(
 				context.TODO(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {
 					p.SetRequestToken(string(buf))
 					return nil
-				}).Struct()
+				})
+			defer release()
+			results, err := res.Struct()
 			if err != nil {
 				badReq(w, "claim request", err)
 				return
@@ -57,7 +60,7 @@ func initZipUploader() {
 				return
 			}
 			rootRwDir = filesystem.RwDirectory{
-				Client: capnp.ToInterface(capability).Client(),
+				Client: capability.Interface().Client(),
 			}
 		})
 
@@ -112,18 +115,22 @@ func initZipUploader() {
 						// Mkdir might fail if the directory already exists, so
 						// instead of using its return value, we just make
 						// another call to walk afterwards.
-						rwDir.Mkdir(
+						_, release := rwDir.Mkdir(
 							ctx,
 							func(p filesystem.RwDirectory_mkdir_Params) error {
 								p.SetName(part)
 								return nil
-							}).Dir()
-						rwDir.Client = rwDir.Walk(
+							})
+						release()
+						res, release := rwDir.Walk(
 							ctx,
 							func(p filesystem.Directory_walk_Params) error {
 								p.SetName(part)
 								return nil
-							}).Node().Client
+							})
+						rwDir.Client = res.Node().Client
+						// TODO: better place to put this?
+						defer release()
 					}
 				}
 				file, err := f.Open()
@@ -131,24 +138,24 @@ func initZipUploader() {
 					badReq(err.Error())
 					return
 				}
-				out := rwDir.Create(
+				createRes, releaseCreate := rwDir.Create(
 					ctx,
 					func(p filesystem.RwDirectory_create_Params) error {
 						p.SetName(f.Name)
 						p.SetExecutable((f.Mode() & 0111) != 0)
 						return nil
-					}).File().Write(
+					})
+				writeRes, releaseWrite := createRes.File().Write(
 					ctx,
 					func(p filesystem.RwFile_write_Params) error {
 						p.SetStartAt(0)
 						return nil
-					}).Sink()
-				wc := &util.ByteStreamWriteCloser{
-					Obj: out,
-					Ctx: ctx,
-				}
+					})
+				out := writeRes.Sink()
+				wc := bytestream.ToWriteCloser(ctx, out)
 				_, err = io.Copy(wc, file)
-				out.Client.Close()
+				releaseCreate()
+				releaseWrite()
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					log.Print(err)

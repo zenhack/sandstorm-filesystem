@@ -3,7 +3,7 @@
 package filesystem
 
 import (
-	context "golang.org/x/net/context"
+	context "context"
 	strconv "strconv"
 	util "zenhack.net/go/sandstorm/capnp/util"
 	capnp "zombiezen.com/go/capnproto2"
@@ -12,41 +12,47 @@ import (
 	server "zombiezen.com/go/capnproto2/server"
 )
 
-type Node struct{ Client capnp.Client }
+type Node struct{ Client *capnp.Client }
 
 // Node_TypeID is the unique identifier for the type Node.
 const Node_TypeID = 0x955400781a01b061
 
-func (c Node) Stat(ctx context.Context, params func(Node_stat_Params) error, opts ...capnp.CallOption) Node_stat_Results_Promise {
-	if c.Client == nil {
-		return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Node) Stat(ctx context.Context, params func(Node_stat_Params) error) (Node_stat_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x955400781a01b061,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
 	}
-	return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Node_stat_Results_Future{Future: ans.Future()}, release
 }
 
+// A Node_Server is a Node with a local implementation.
 type Node_Server interface {
-	Stat(Node_stat) error
+	Stat(context.Context, Node_stat) error
 }
 
-func Node_ServerToClient(s Node_Server) Node {
-	c, _ := s.(server.Closer)
-	return Node{Client: server.New(Node_Methods(nil, s), c)}
+// Node_NewServer creates a new Server from an implementation of Node_Server.
+func Node_NewServer(s Node_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(Node_Methods(nil, s), s, c, policy)
 }
 
+// Node_ServerToClient creates a new Client from an implementation of Node_Server.
+// The caller is responsible for calling Release on the returned Client.
+func Node_ServerToClient(s Node_Server, policy *server.Policy) Node {
+	return Node{Client: capnp.NewClient(Node_NewServer(s, policy))}
+}
+
+// Node_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func Node_Methods(methods []server.Method, s Node_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 1)
@@ -59,22 +65,29 @@ func Node_Methods(methods []server.Method, s Node_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Node_stat{c, opts, Node_stat_Params{Struct: p}, Node_stat_Results{Struct: r}}
-			return s.Stat(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Stat(ctx, Node_stat{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	return methods
 }
 
-// Node_stat holds the arguments for a server call to Node.stat.
+// Node_stat holds the state for a server call to Node.stat.
+// See server.Call for documentation.
 type Node_stat struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Node_stat_Params
-	Results Node_stat_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c Node_stat) Args() Node_stat_Params {
+	return Node_stat_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c Node_stat) AllocResults() (Node_stat_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return Node_stat_Results{Struct: r}, err
 }
 
 type Node_stat_Params struct{ capnp.Struct }
@@ -93,7 +106,7 @@ func NewRootNode_stat_Params(s *capnp.Segment) (Node_stat_Params, error) {
 }
 
 func ReadRootNode_stat_Params(msg *capnp.Message) (Node_stat_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Node_stat_Params{root.Struct()}, err
 }
 
@@ -130,11 +143,11 @@ func (s Node_stat_Params_List) String() string {
 	return str
 }
 
-// Node_stat_Params_Promise is a wrapper for a Node_stat_Params promised by a client call.
-type Node_stat_Params_Promise struct{ *capnp.Pipeline }
+// Node_stat_Params_Future is a wrapper for a Node_stat_Params promised by a client call.
+type Node_stat_Params_Future struct{ *capnp.Future }
 
-func (p Node_stat_Params_Promise) Struct() (Node_stat_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p Node_stat_Params_Future) Struct() (Node_stat_Params, error) {
+	s, err := p.Future.Struct()
 	return Node_stat_Params{s}, err
 }
 
@@ -154,7 +167,7 @@ func NewRootNode_stat_Results(s *capnp.Segment) (Node_stat_Results, error) {
 }
 
 func ReadRootNode_stat_Results(msg *capnp.Message) (Node_stat_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Node_stat_Results{root.Struct()}, err
 }
 
@@ -169,8 +182,7 @@ func (s Node_stat_Results) Info() (StatInfo, error) {
 }
 
 func (s Node_stat_Results) HasInfo() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Node_stat_Results) SetInfo(v StatInfo) error {
@@ -210,16 +222,16 @@ func (s Node_stat_Results_List) String() string {
 	return str
 }
 
-// Node_stat_Results_Promise is a wrapper for a Node_stat_Results promised by a client call.
-type Node_stat_Results_Promise struct{ *capnp.Pipeline }
+// Node_stat_Results_Future is a wrapper for a Node_stat_Results promised by a client call.
+type Node_stat_Results_Future struct{ *capnp.Future }
 
-func (p Node_stat_Results_Promise) Struct() (Node_stat_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p Node_stat_Results_Future) Struct() (Node_stat_Results, error) {
+	s, err := p.Future.Struct()
 	return Node_stat_Results{s}, err
 }
 
-func (p Node_stat_Results_Promise) Info() StatInfo_Promise {
-	return StatInfo_Promise{Pipeline: p.Pipeline.GetPipeline(0)}
+func (p Node_stat_Results_Future) Info() StatInfo_Future {
+	return StatInfo_Future{Future: p.Future.Field(0, nil)}
 }
 
 type StatInfo struct{ capnp.Struct }
@@ -261,7 +273,7 @@ func NewRootStatInfo(s *capnp.Segment) (StatInfo, error) {
 }
 
 func ReadRootStatInfo(msg *capnp.Message) (StatInfo, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return StatInfo{root.Struct()}, err
 }
 
@@ -304,8 +316,7 @@ func (s StatInfo_symlink) Target() (string, error) {
 }
 
 func (s StatInfo_symlink) HasTarget() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s StatInfo_symlink) TargetBytes() ([]byte, error) {
@@ -351,115 +362,111 @@ func (s StatInfo_List) String() string {
 	return str
 }
 
-// StatInfo_Promise is a wrapper for a StatInfo promised by a client call.
-type StatInfo_Promise struct{ *capnp.Pipeline }
+// StatInfo_Future is a wrapper for a StatInfo promised by a client call.
+type StatInfo_Future struct{ *capnp.Future }
 
-func (p StatInfo_Promise) Struct() (StatInfo, error) {
-	s, err := p.Pipeline.Struct()
+func (p StatInfo_Future) Struct() (StatInfo, error) {
+	s, err := p.Future.Struct()
 	return StatInfo{s}, err
 }
 
-func (p StatInfo_Promise) File() StatInfo_file_Promise { return StatInfo_file_Promise{p.Pipeline} }
+func (p StatInfo_Future) File() StatInfo_file_Future { return StatInfo_file_Future{p.Future} }
 
-// StatInfo_file_Promise is a wrapper for a StatInfo_file promised by a client call.
-type StatInfo_file_Promise struct{ *capnp.Pipeline }
+// StatInfo_file_Future is a wrapper for a StatInfo_file promised by a client call.
+type StatInfo_file_Future struct{ *capnp.Future }
 
-func (p StatInfo_file_Promise) Struct() (StatInfo_file, error) {
-	s, err := p.Pipeline.Struct()
+func (p StatInfo_file_Future) Struct() (StatInfo_file, error) {
+	s, err := p.Future.Struct()
 	return StatInfo_file{s}, err
 }
 
-func (p StatInfo_Promise) Symlink() StatInfo_symlink_Promise {
-	return StatInfo_symlink_Promise{p.Pipeline}
-}
+func (p StatInfo_Future) Symlink() StatInfo_symlink_Future { return StatInfo_symlink_Future{p.Future} }
 
-// StatInfo_symlink_Promise is a wrapper for a StatInfo_symlink promised by a client call.
-type StatInfo_symlink_Promise struct{ *capnp.Pipeline }
+// StatInfo_symlink_Future is a wrapper for a StatInfo_symlink promised by a client call.
+type StatInfo_symlink_Future struct{ *capnp.Future }
 
-func (p StatInfo_symlink_Promise) Struct() (StatInfo_symlink, error) {
-	s, err := p.Pipeline.Struct()
+func (p StatInfo_symlink_Future) Struct() (StatInfo_symlink, error) {
+	s, err := p.Future.Struct()
 	return StatInfo_symlink{s}, err
 }
 
-type Directory struct{ Client capnp.Client }
+type Directory struct{ Client *capnp.Client }
 
 // Directory_TypeID is the unique identifier for the type Directory.
 const Directory_TypeID = 0xce3039544779e0fc
 
-func (c Directory) List(ctx context.Context, params func(Directory_list_Params) error, opts ...capnp.CallOption) Directory_list_Results_Promise {
-	if c.Client == nil {
-		return Directory_list_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Directory) List(ctx context.Context, params func(Directory_list_Params) error) (Directory_list_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xce3039544779e0fc,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "list",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_list_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_list_Params{Struct: s}) }
 	}
-	return Directory_list_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_list_Results_Future{Future: ans.Future()}, release
 }
-func (c Directory) Walk(ctx context.Context, params func(Directory_walk_Params) error, opts ...capnp.CallOption) Directory_walk_Results_Promise {
-	if c.Client == nil {
-		return Directory_walk_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Directory) Walk(ctx context.Context, params func(Directory_walk_Params) error) (Directory_walk_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xce3039544779e0fc,
 			MethodID:      1,
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "walk",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_walk_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_walk_Params{Struct: s}) }
 	}
-	return Directory_walk_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_walk_Results_Future{Future: ans.Future()}, release
 }
-func (c Directory) Stat(ctx context.Context, params func(Node_stat_Params) error, opts ...capnp.CallOption) Node_stat_Results_Promise {
-	if c.Client == nil {
-		return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Directory) Stat(ctx context.Context, params func(Node_stat_Params) error) (Node_stat_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x955400781a01b061,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
 	}
-	return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Node_stat_Results_Future{Future: ans.Future()}, release
 }
 
+// A Directory_Server is a Directory with a local implementation.
 type Directory_Server interface {
-	List(Directory_list) error
+	List(context.Context, Directory_list) error
 
-	Walk(Directory_walk) error
+	Walk(context.Context, Directory_walk) error
 
-	Stat(Node_stat) error
+	Stat(context.Context, Node_stat) error
 }
 
-func Directory_ServerToClient(s Directory_Server) Directory {
-	c, _ := s.(server.Closer)
-	return Directory{Client: server.New(Directory_Methods(nil, s), c)}
+// Directory_NewServer creates a new Server from an implementation of Directory_Server.
+func Directory_NewServer(s Directory_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(Directory_Methods(nil, s), s, c, policy)
 }
 
+// Directory_ServerToClient creates a new Client from an implementation of Directory_Server.
+// The caller is responsible for calling Release on the returned Client.
+func Directory_ServerToClient(s Directory_Server, policy *server.Policy) Directory {
+	return Directory{Client: capnp.NewClient(Directory_NewServer(s, policy))}
+}
+
+// Directory_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func Directory_Methods(methods []server.Method, s Directory_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 3)
@@ -472,11 +479,9 @@ func Directory_Methods(methods []server.Method, s Directory_Server) []server.Met
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "list",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_list{c, opts, Directory_list_Params{Struct: p}, Directory_list_Results{Struct: r}}
-			return s.List(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.List(ctx, Directory_list{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -486,11 +491,9 @@ func Directory_Methods(methods []server.Method, s Directory_Server) []server.Met
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "walk",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_walk{c, opts, Directory_walk_Params{Struct: p}, Directory_walk_Results{Struct: r}}
-			return s.Walk(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Walk(ctx, Directory_walk{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	methods = append(methods, server.Method{
@@ -500,30 +503,46 @@ func Directory_Methods(methods []server.Method, s Directory_Server) []server.Met
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Node_stat{c, opts, Node_stat_Params{Struct: p}, Node_stat_Results{Struct: r}}
-			return s.Stat(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Stat(ctx, Node_stat{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	return methods
 }
 
-// Directory_list holds the arguments for a server call to Directory.list.
+// Directory_list holds the state for a server call to Directory.list.
+// See server.Call for documentation.
 type Directory_list struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Directory_list_Params
-	Results Directory_list_Results
+	*server.Call
 }
 
-// Directory_walk holds the arguments for a server call to Directory.walk.
+// Args returns the call's arguments.
+func (c Directory_list) Args() Directory_list_Params {
+	return Directory_list_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c Directory_list) AllocResults() (Directory_list_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return Directory_list_Results{Struct: r}, err
+}
+
+// Directory_walk holds the state for a server call to Directory.walk.
+// See server.Call for documentation.
 type Directory_walk struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Directory_walk_Params
-	Results Directory_walk_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c Directory_walk) Args() Directory_walk_Params {
+	return Directory_walk_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c Directory_walk) AllocResults() (Directory_walk_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return Directory_walk_Results{Struct: r}, err
 }
 
 type Directory_Entry struct{ capnp.Struct }
@@ -542,7 +561,7 @@ func NewRootDirectory_Entry(s *capnp.Segment) (Directory_Entry, error) {
 }
 
 func ReadRootDirectory_Entry(msg *capnp.Message) (Directory_Entry, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_Entry{root.Struct()}, err
 }
 
@@ -557,8 +576,7 @@ func (s Directory_Entry) Name() (string, error) {
 }
 
 func (s Directory_Entry) HasName() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Directory_Entry) NameBytes() ([]byte, error) {
@@ -576,8 +594,7 @@ func (s Directory_Entry) Info() (StatInfo, error) {
 }
 
 func (s Directory_Entry) HasInfo() bool {
-	p, err := s.Struct.Ptr(1)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(1)
 }
 
 func (s Directory_Entry) SetInfo(v StatInfo) error {
@@ -615,75 +632,77 @@ func (s Directory_Entry_List) String() string {
 	return str
 }
 
-// Directory_Entry_Promise is a wrapper for a Directory_Entry promised by a client call.
-type Directory_Entry_Promise struct{ *capnp.Pipeline }
+// Directory_Entry_Future is a wrapper for a Directory_Entry promised by a client call.
+type Directory_Entry_Future struct{ *capnp.Future }
 
-func (p Directory_Entry_Promise) Struct() (Directory_Entry, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_Entry_Future) Struct() (Directory_Entry, error) {
+	s, err := p.Future.Struct()
 	return Directory_Entry{s}, err
 }
 
-func (p Directory_Entry_Promise) Info() StatInfo_Promise {
-	return StatInfo_Promise{Pipeline: p.Pipeline.GetPipeline(1)}
+func (p Directory_Entry_Future) Info() StatInfo_Future {
+	return StatInfo_Future{Future: p.Future.Field(1, nil)}
 }
 
-type Directory_Entry_Stream struct{ Client capnp.Client }
+type Directory_Entry_Stream struct{ Client *capnp.Client }
 
 // Directory_Entry_Stream_TypeID is the unique identifier for the type Directory_Entry_Stream.
 const Directory_Entry_Stream_TypeID = 0x88b56c7e729acc32
 
-func (c Directory_Entry_Stream) Push(ctx context.Context, params func(Directory_Entry_Stream_push_Params) error, opts ...capnp.CallOption) Directory_Entry_Stream_push_Results_Promise {
-	if c.Client == nil {
-		return Directory_Entry_Stream_push_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Directory_Entry_Stream) Push(ctx context.Context, params func(Directory_Entry_Stream_push_Params) error) (Directory_Entry_Stream_push_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x88b56c7e729acc32,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Directory.Entry.Stream",
 			MethodName:    "push",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_Entry_Stream_push_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_Entry_Stream_push_Params{Struct: s}) }
 	}
-	return Directory_Entry_Stream_push_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_Entry_Stream_push_Results_Future{Future: ans.Future()}, release
 }
-func (c Directory_Entry_Stream) Done(ctx context.Context, params func(Directory_Entry_Stream_done_Params) error, opts ...capnp.CallOption) Directory_Entry_Stream_done_Results_Promise {
-	if c.Client == nil {
-		return Directory_Entry_Stream_done_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c Directory_Entry_Stream) Done(ctx context.Context, params func(Directory_Entry_Stream_done_Params) error) (Directory_Entry_Stream_done_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x88b56c7e729acc32,
 			MethodID:      1,
 			InterfaceName: "filesystem.capnp:Directory.Entry.Stream",
 			MethodName:    "done",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_Entry_Stream_done_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_Entry_Stream_done_Params{Struct: s}) }
 	}
-	return Directory_Entry_Stream_done_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_Entry_Stream_done_Results_Future{Future: ans.Future()}, release
 }
 
+// A Directory_Entry_Stream_Server is a Directory_Entry_Stream with a local implementation.
 type Directory_Entry_Stream_Server interface {
-	Push(Directory_Entry_Stream_push) error
+	Push(context.Context, Directory_Entry_Stream_push) error
 
-	Done(Directory_Entry_Stream_done) error
+	Done(context.Context, Directory_Entry_Stream_done) error
 }
 
-func Directory_Entry_Stream_ServerToClient(s Directory_Entry_Stream_Server) Directory_Entry_Stream {
-	c, _ := s.(server.Closer)
-	return Directory_Entry_Stream{Client: server.New(Directory_Entry_Stream_Methods(nil, s), c)}
+// Directory_Entry_Stream_NewServer creates a new Server from an implementation of Directory_Entry_Stream_Server.
+func Directory_Entry_Stream_NewServer(s Directory_Entry_Stream_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(Directory_Entry_Stream_Methods(nil, s), s, c, policy)
 }
 
+// Directory_Entry_Stream_ServerToClient creates a new Client from an implementation of Directory_Entry_Stream_Server.
+// The caller is responsible for calling Release on the returned Client.
+func Directory_Entry_Stream_ServerToClient(s Directory_Entry_Stream_Server, policy *server.Policy) Directory_Entry_Stream {
+	return Directory_Entry_Stream{Client: capnp.NewClient(Directory_Entry_Stream_NewServer(s, policy))}
+}
+
+// Directory_Entry_Stream_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func Directory_Entry_Stream_Methods(methods []server.Method, s Directory_Entry_Stream_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 2)
@@ -696,11 +715,9 @@ func Directory_Entry_Stream_Methods(methods []server.Method, s Directory_Entry_S
 			InterfaceName: "filesystem.capnp:Directory.Entry.Stream",
 			MethodName:    "push",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_Entry_Stream_push{c, opts, Directory_Entry_Stream_push_Params{Struct: p}, Directory_Entry_Stream_push_Results{Struct: r}}
-			return s.Push(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Push(ctx, Directory_Entry_Stream_push{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -710,30 +727,46 @@ func Directory_Entry_Stream_Methods(methods []server.Method, s Directory_Entry_S
 			InterfaceName: "filesystem.capnp:Directory.Entry.Stream",
 			MethodName:    "done",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_Entry_Stream_done{c, opts, Directory_Entry_Stream_done_Params{Struct: p}, Directory_Entry_Stream_done_Results{Struct: r}}
-			return s.Done(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Done(ctx, Directory_Entry_Stream_done{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	return methods
 }
 
-// Directory_Entry_Stream_push holds the arguments for a server call to Directory_Entry_Stream.push.
+// Directory_Entry_Stream_push holds the state for a server call to Directory_Entry_Stream.push.
+// See server.Call for documentation.
 type Directory_Entry_Stream_push struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Directory_Entry_Stream_push_Params
-	Results Directory_Entry_Stream_push_Results
+	*server.Call
 }
 
-// Directory_Entry_Stream_done holds the arguments for a server call to Directory_Entry_Stream.done.
+// Args returns the call's arguments.
+func (c Directory_Entry_Stream_push) Args() Directory_Entry_Stream_push_Params {
+	return Directory_Entry_Stream_push_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c Directory_Entry_Stream_push) AllocResults() (Directory_Entry_Stream_push_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return Directory_Entry_Stream_push_Results{Struct: r}, err
+}
+
+// Directory_Entry_Stream_done holds the state for a server call to Directory_Entry_Stream.done.
+// See server.Call for documentation.
 type Directory_Entry_Stream_done struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Directory_Entry_Stream_done_Params
-	Results Directory_Entry_Stream_done_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c Directory_Entry_Stream_done) Args() Directory_Entry_Stream_done_Params {
+	return Directory_Entry_Stream_done_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c Directory_Entry_Stream_done) AllocResults() (Directory_Entry_Stream_done_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return Directory_Entry_Stream_done_Results{Struct: r}, err
 }
 
 type Directory_Entry_Stream_push_Params struct{ capnp.Struct }
@@ -752,7 +785,7 @@ func NewRootDirectory_Entry_Stream_push_Params(s *capnp.Segment) (Directory_Entr
 }
 
 func ReadRootDirectory_Entry_Stream_push_Params(msg *capnp.Message) (Directory_Entry_Stream_push_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_Entry_Stream_push_Params{root.Struct()}, err
 }
 
@@ -767,8 +800,7 @@ func (s Directory_Entry_Stream_push_Params) Entries() (Directory_Entry_List, err
 }
 
 func (s Directory_Entry_Stream_push_Params) HasEntries() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Directory_Entry_Stream_push_Params) SetEntries(v Directory_Entry_List) error {
@@ -808,11 +840,11 @@ func (s Directory_Entry_Stream_push_Params_List) String() string {
 	return str
 }
 
-// Directory_Entry_Stream_push_Params_Promise is a wrapper for a Directory_Entry_Stream_push_Params promised by a client call.
-type Directory_Entry_Stream_push_Params_Promise struct{ *capnp.Pipeline }
+// Directory_Entry_Stream_push_Params_Future is a wrapper for a Directory_Entry_Stream_push_Params promised by a client call.
+type Directory_Entry_Stream_push_Params_Future struct{ *capnp.Future }
 
-func (p Directory_Entry_Stream_push_Params_Promise) Struct() (Directory_Entry_Stream_push_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_Entry_Stream_push_Params_Future) Struct() (Directory_Entry_Stream_push_Params, error) {
+	s, err := p.Future.Struct()
 	return Directory_Entry_Stream_push_Params{s}, err
 }
 
@@ -832,7 +864,7 @@ func NewRootDirectory_Entry_Stream_push_Results(s *capnp.Segment) (Directory_Ent
 }
 
 func ReadRootDirectory_Entry_Stream_push_Results(msg *capnp.Message) (Directory_Entry_Stream_push_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_Entry_Stream_push_Results{root.Struct()}, err
 }
 
@@ -863,11 +895,11 @@ func (s Directory_Entry_Stream_push_Results_List) String() string {
 	return str
 }
 
-// Directory_Entry_Stream_push_Results_Promise is a wrapper for a Directory_Entry_Stream_push_Results promised by a client call.
-type Directory_Entry_Stream_push_Results_Promise struct{ *capnp.Pipeline }
+// Directory_Entry_Stream_push_Results_Future is a wrapper for a Directory_Entry_Stream_push_Results promised by a client call.
+type Directory_Entry_Stream_push_Results_Future struct{ *capnp.Future }
 
-func (p Directory_Entry_Stream_push_Results_Promise) Struct() (Directory_Entry_Stream_push_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_Entry_Stream_push_Results_Future) Struct() (Directory_Entry_Stream_push_Results, error) {
+	s, err := p.Future.Struct()
 	return Directory_Entry_Stream_push_Results{s}, err
 }
 
@@ -887,7 +919,7 @@ func NewRootDirectory_Entry_Stream_done_Params(s *capnp.Segment) (Directory_Entr
 }
 
 func ReadRootDirectory_Entry_Stream_done_Params(msg *capnp.Message) (Directory_Entry_Stream_done_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_Entry_Stream_done_Params{root.Struct()}, err
 }
 
@@ -918,11 +950,11 @@ func (s Directory_Entry_Stream_done_Params_List) String() string {
 	return str
 }
 
-// Directory_Entry_Stream_done_Params_Promise is a wrapper for a Directory_Entry_Stream_done_Params promised by a client call.
-type Directory_Entry_Stream_done_Params_Promise struct{ *capnp.Pipeline }
+// Directory_Entry_Stream_done_Params_Future is a wrapper for a Directory_Entry_Stream_done_Params promised by a client call.
+type Directory_Entry_Stream_done_Params_Future struct{ *capnp.Future }
 
-func (p Directory_Entry_Stream_done_Params_Promise) Struct() (Directory_Entry_Stream_done_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_Entry_Stream_done_Params_Future) Struct() (Directory_Entry_Stream_done_Params, error) {
+	s, err := p.Future.Struct()
 	return Directory_Entry_Stream_done_Params{s}, err
 }
 
@@ -942,7 +974,7 @@ func NewRootDirectory_Entry_Stream_done_Results(s *capnp.Segment) (Directory_Ent
 }
 
 func ReadRootDirectory_Entry_Stream_done_Results(msg *capnp.Message) (Directory_Entry_Stream_done_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_Entry_Stream_done_Results{root.Struct()}, err
 }
 
@@ -973,11 +1005,11 @@ func (s Directory_Entry_Stream_done_Results_List) String() string {
 	return str
 }
 
-// Directory_Entry_Stream_done_Results_Promise is a wrapper for a Directory_Entry_Stream_done_Results promised by a client call.
-type Directory_Entry_Stream_done_Results_Promise struct{ *capnp.Pipeline }
+// Directory_Entry_Stream_done_Results_Future is a wrapper for a Directory_Entry_Stream_done_Results promised by a client call.
+type Directory_Entry_Stream_done_Results_Future struct{ *capnp.Future }
 
-func (p Directory_Entry_Stream_done_Results_Promise) Struct() (Directory_Entry_Stream_done_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_Entry_Stream_done_Results_Future) Struct() (Directory_Entry_Stream_done_Results, error) {
+	s, err := p.Future.Struct()
 	return Directory_Entry_Stream_done_Results{s}, err
 }
 
@@ -997,7 +1029,7 @@ func NewRootDirectory_list_Params(s *capnp.Segment) (Directory_list_Params, erro
 }
 
 func ReadRootDirectory_list_Params(msg *capnp.Message) (Directory_list_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_list_Params{root.Struct()}, err
 }
 
@@ -1012,12 +1044,11 @@ func (s Directory_list_Params) Stream() Directory_Entry_Stream {
 }
 
 func (s Directory_list_Params) HasStream() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Directory_list_Params) SetStream(v Directory_Entry_Stream) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -1047,16 +1078,16 @@ func (s Directory_list_Params_List) String() string {
 	return str
 }
 
-// Directory_list_Params_Promise is a wrapper for a Directory_list_Params promised by a client call.
-type Directory_list_Params_Promise struct{ *capnp.Pipeline }
+// Directory_list_Params_Future is a wrapper for a Directory_list_Params promised by a client call.
+type Directory_list_Params_Future struct{ *capnp.Future }
 
-func (p Directory_list_Params_Promise) Struct() (Directory_list_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_list_Params_Future) Struct() (Directory_list_Params, error) {
+	s, err := p.Future.Struct()
 	return Directory_list_Params{s}, err
 }
 
-func (p Directory_list_Params_Promise) Stream() Directory_Entry_Stream {
-	return Directory_Entry_Stream{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p Directory_list_Params_Future) Stream() Directory_Entry_Stream {
+	return Directory_Entry_Stream{Client: p.Future.Field(0, nil).Client()}
 }
 
 type Directory_list_Results struct{ capnp.Struct }
@@ -1075,7 +1106,7 @@ func NewRootDirectory_list_Results(s *capnp.Segment) (Directory_list_Results, er
 }
 
 func ReadRootDirectory_list_Results(msg *capnp.Message) (Directory_list_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_list_Results{root.Struct()}, err
 }
 
@@ -1106,11 +1137,11 @@ func (s Directory_list_Results_List) String() string {
 	return str
 }
 
-// Directory_list_Results_Promise is a wrapper for a Directory_list_Results promised by a client call.
-type Directory_list_Results_Promise struct{ *capnp.Pipeline }
+// Directory_list_Results_Future is a wrapper for a Directory_list_Results promised by a client call.
+type Directory_list_Results_Future struct{ *capnp.Future }
 
-func (p Directory_list_Results_Promise) Struct() (Directory_list_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_list_Results_Future) Struct() (Directory_list_Results, error) {
+	s, err := p.Future.Struct()
 	return Directory_list_Results{s}, err
 }
 
@@ -1130,7 +1161,7 @@ func NewRootDirectory_walk_Params(s *capnp.Segment) (Directory_walk_Params, erro
 }
 
 func ReadRootDirectory_walk_Params(msg *capnp.Message) (Directory_walk_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_walk_Params{root.Struct()}, err
 }
 
@@ -1145,8 +1176,7 @@ func (s Directory_walk_Params) Name() (string, error) {
 }
 
 func (s Directory_walk_Params) HasName() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Directory_walk_Params) NameBytes() ([]byte, error) {
@@ -1180,11 +1210,11 @@ func (s Directory_walk_Params_List) String() string {
 	return str
 }
 
-// Directory_walk_Params_Promise is a wrapper for a Directory_walk_Params promised by a client call.
-type Directory_walk_Params_Promise struct{ *capnp.Pipeline }
+// Directory_walk_Params_Future is a wrapper for a Directory_walk_Params promised by a client call.
+type Directory_walk_Params_Future struct{ *capnp.Future }
 
-func (p Directory_walk_Params_Promise) Struct() (Directory_walk_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_walk_Params_Future) Struct() (Directory_walk_Params, error) {
+	s, err := p.Future.Struct()
 	return Directory_walk_Params{s}, err
 }
 
@@ -1204,7 +1234,7 @@ func NewRootDirectory_walk_Results(s *capnp.Segment) (Directory_walk_Results, er
 }
 
 func ReadRootDirectory_walk_Results(msg *capnp.Message) (Directory_walk_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return Directory_walk_Results{root.Struct()}, err
 }
 
@@ -1219,12 +1249,11 @@ func (s Directory_walk_Results) Node() Node {
 }
 
 func (s Directory_walk_Results) HasNode() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s Directory_walk_Results) SetNode(v Node) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -1254,163 +1283,149 @@ func (s Directory_walk_Results_List) String() string {
 	return str
 }
 
-// Directory_walk_Results_Promise is a wrapper for a Directory_walk_Results promised by a client call.
-type Directory_walk_Results_Promise struct{ *capnp.Pipeline }
+// Directory_walk_Results_Future is a wrapper for a Directory_walk_Results promised by a client call.
+type Directory_walk_Results_Future struct{ *capnp.Future }
 
-func (p Directory_walk_Results_Promise) Struct() (Directory_walk_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p Directory_walk_Results_Future) Struct() (Directory_walk_Results, error) {
+	s, err := p.Future.Struct()
 	return Directory_walk_Results{s}, err
 }
 
-func (p Directory_walk_Results_Promise) Node() Node {
-	return Node{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p Directory_walk_Results_Future) Node() Node {
+	return Node{Client: p.Future.Field(0, nil).Client()}
 }
 
-type RwDirectory struct{ Client capnp.Client }
+type RwDirectory struct{ Client *capnp.Client }
 
 // RwDirectory_TypeID is the unique identifier for the type RwDirectory.
 const RwDirectory_TypeID = 0xdffe2836f5c5dffc
 
-func (c RwDirectory) Create(ctx context.Context, params func(RwDirectory_create_Params) error, opts ...capnp.CallOption) RwDirectory_create_Results_Promise {
-	if c.Client == nil {
-		return RwDirectory_create_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) Create(ctx context.Context, params func(RwDirectory_create_Params) error) (RwDirectory_create_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xdffe2836f5c5dffc,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "create",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwDirectory_create_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwDirectory_create_Params{Struct: s}) }
 	}
-	return RwDirectory_create_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwDirectory_create_Results_Future{Future: ans.Future()}, release
 }
-func (c RwDirectory) Mkdir(ctx context.Context, params func(RwDirectory_mkdir_Params) error, opts ...capnp.CallOption) RwDirectory_mkdir_Results_Promise {
-	if c.Client == nil {
-		return RwDirectory_mkdir_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) Mkdir(ctx context.Context, params func(RwDirectory_mkdir_Params) error) (RwDirectory_mkdir_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xdffe2836f5c5dffc,
 			MethodID:      1,
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "mkdir",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwDirectory_mkdir_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwDirectory_mkdir_Params{Struct: s}) }
 	}
-	return RwDirectory_mkdir_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwDirectory_mkdir_Results_Future{Future: ans.Future()}, release
 }
-func (c RwDirectory) Delete(ctx context.Context, params func(RwDirectory_delete_Params) error, opts ...capnp.CallOption) RwDirectory_delete_Results_Promise {
-	if c.Client == nil {
-		return RwDirectory_delete_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) Delete(ctx context.Context, params func(RwDirectory_delete_Params) error) (RwDirectory_delete_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xdffe2836f5c5dffc,
 			MethodID:      2,
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "delete",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwDirectory_delete_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwDirectory_delete_Params{Struct: s}) }
 	}
-	return RwDirectory_delete_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwDirectory_delete_Results_Future{Future: ans.Future()}, release
 }
-func (c RwDirectory) List(ctx context.Context, params func(Directory_list_Params) error, opts ...capnp.CallOption) Directory_list_Results_Promise {
-	if c.Client == nil {
-		return Directory_list_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) List(ctx context.Context, params func(Directory_list_Params) error) (Directory_list_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xce3039544779e0fc,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "list",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_list_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_list_Params{Struct: s}) }
 	}
-	return Directory_list_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_list_Results_Future{Future: ans.Future()}, release
 }
-func (c RwDirectory) Walk(ctx context.Context, params func(Directory_walk_Params) error, opts ...capnp.CallOption) Directory_walk_Results_Promise {
-	if c.Client == nil {
-		return Directory_walk_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) Walk(ctx context.Context, params func(Directory_walk_Params) error) (Directory_walk_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xce3039544779e0fc,
 			MethodID:      1,
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "walk",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Directory_walk_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Directory_walk_Params{Struct: s}) }
 	}
-	return Directory_walk_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Directory_walk_Results_Future{Future: ans.Future()}, release
 }
-func (c RwDirectory) Stat(ctx context.Context, params func(Node_stat_Params) error, opts ...capnp.CallOption) Node_stat_Results_Promise {
-	if c.Client == nil {
-		return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwDirectory) Stat(ctx context.Context, params func(Node_stat_Params) error) (Node_stat_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x955400781a01b061,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
 	}
-	return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Node_stat_Results_Future{Future: ans.Future()}, release
 }
 
+// A RwDirectory_Server is a RwDirectory with a local implementation.
 type RwDirectory_Server interface {
-	Create(RwDirectory_create) error
+	Create(context.Context, RwDirectory_create) error
 
-	Mkdir(RwDirectory_mkdir) error
+	Mkdir(context.Context, RwDirectory_mkdir) error
 
-	Delete(RwDirectory_delete) error
+	Delete(context.Context, RwDirectory_delete) error
 
-	List(Directory_list) error
+	List(context.Context, Directory_list) error
 
-	Walk(Directory_walk) error
+	Walk(context.Context, Directory_walk) error
 
-	Stat(Node_stat) error
+	Stat(context.Context, Node_stat) error
 }
 
-func RwDirectory_ServerToClient(s RwDirectory_Server) RwDirectory {
-	c, _ := s.(server.Closer)
-	return RwDirectory{Client: server.New(RwDirectory_Methods(nil, s), c)}
+// RwDirectory_NewServer creates a new Server from an implementation of RwDirectory_Server.
+func RwDirectory_NewServer(s RwDirectory_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(RwDirectory_Methods(nil, s), s, c, policy)
 }
 
+// RwDirectory_ServerToClient creates a new Client from an implementation of RwDirectory_Server.
+// The caller is responsible for calling Release on the returned Client.
+func RwDirectory_ServerToClient(s RwDirectory_Server, policy *server.Policy) RwDirectory {
+	return RwDirectory{Client: capnp.NewClient(RwDirectory_NewServer(s, policy))}
+}
+
+// RwDirectory_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 6)
@@ -1423,11 +1438,9 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "create",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwDirectory_create{c, opts, RwDirectory_create_Params{Struct: p}, RwDirectory_create_Results{Struct: r}}
-			return s.Create(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Create(ctx, RwDirectory_create{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	methods = append(methods, server.Method{
@@ -1437,11 +1450,9 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "mkdir",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwDirectory_mkdir{c, opts, RwDirectory_mkdir_Params{Struct: p}, RwDirectory_mkdir_Results{Struct: r}}
-			return s.Mkdir(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Mkdir(ctx, RwDirectory_mkdir{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	methods = append(methods, server.Method{
@@ -1451,11 +1462,9 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:RwDirectory",
 			MethodName:    "delete",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwDirectory_delete{c, opts, RwDirectory_delete_Params{Struct: p}, RwDirectory_delete_Results{Struct: r}}
-			return s.Delete(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Delete(ctx, RwDirectory_delete{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -1465,11 +1474,9 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "list",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_list{c, opts, Directory_list_Params{Struct: p}, Directory_list_Results{Struct: r}}
-			return s.List(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.List(ctx, Directory_list{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -1479,11 +1486,9 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:Directory",
 			MethodName:    "walk",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Directory_walk{c, opts, Directory_walk_Params{Struct: p}, Directory_walk_Results{Struct: r}}
-			return s.Walk(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Walk(ctx, Directory_walk{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	methods = append(methods, server.Method{
@@ -1493,38 +1498,63 @@ func RwDirectory_Methods(methods []server.Method, s RwDirectory_Server) []server
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Node_stat{c, opts, Node_stat_Params{Struct: p}, Node_stat_Results{Struct: r}}
-			return s.Stat(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Stat(ctx, Node_stat{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	return methods
 }
 
-// RwDirectory_create holds the arguments for a server call to RwDirectory.create.
+// RwDirectory_create holds the state for a server call to RwDirectory.create.
+// See server.Call for documentation.
 type RwDirectory_create struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwDirectory_create_Params
-	Results RwDirectory_create_Results
+	*server.Call
 }
 
-// RwDirectory_mkdir holds the arguments for a server call to RwDirectory.mkdir.
+// Args returns the call's arguments.
+func (c RwDirectory_create) Args() RwDirectory_create_Params {
+	return RwDirectory_create_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwDirectory_create) AllocResults() (RwDirectory_create_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return RwDirectory_create_Results{Struct: r}, err
+}
+
+// RwDirectory_mkdir holds the state for a server call to RwDirectory.mkdir.
+// See server.Call for documentation.
 type RwDirectory_mkdir struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwDirectory_mkdir_Params
-	Results RwDirectory_mkdir_Results
+	*server.Call
 }
 
-// RwDirectory_delete holds the arguments for a server call to RwDirectory.delete.
+// Args returns the call's arguments.
+func (c RwDirectory_mkdir) Args() RwDirectory_mkdir_Params {
+	return RwDirectory_mkdir_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwDirectory_mkdir) AllocResults() (RwDirectory_mkdir_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return RwDirectory_mkdir_Results{Struct: r}, err
+}
+
+// RwDirectory_delete holds the state for a server call to RwDirectory.delete.
+// See server.Call for documentation.
 type RwDirectory_delete struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwDirectory_delete_Params
-	Results RwDirectory_delete_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c RwDirectory_delete) Args() RwDirectory_delete_Params {
+	return RwDirectory_delete_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwDirectory_delete) AllocResults() (RwDirectory_delete_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return RwDirectory_delete_Results{Struct: r}, err
 }
 
 type RwDirectory_create_Params struct{ capnp.Struct }
@@ -1543,7 +1573,7 @@ func NewRootRwDirectory_create_Params(s *capnp.Segment) (RwDirectory_create_Para
 }
 
 func ReadRootRwDirectory_create_Params(msg *capnp.Message) (RwDirectory_create_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_create_Params{root.Struct()}, err
 }
 
@@ -1558,8 +1588,7 @@ func (s RwDirectory_create_Params) Name() (string, error) {
 }
 
 func (s RwDirectory_create_Params) HasName() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwDirectory_create_Params) NameBytes() ([]byte, error) {
@@ -1601,11 +1630,11 @@ func (s RwDirectory_create_Params_List) String() string {
 	return str
 }
 
-// RwDirectory_create_Params_Promise is a wrapper for a RwDirectory_create_Params promised by a client call.
-type RwDirectory_create_Params_Promise struct{ *capnp.Pipeline }
+// RwDirectory_create_Params_Future is a wrapper for a RwDirectory_create_Params promised by a client call.
+type RwDirectory_create_Params_Future struct{ *capnp.Future }
 
-func (p RwDirectory_create_Params_Promise) Struct() (RwDirectory_create_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_create_Params_Future) Struct() (RwDirectory_create_Params, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_create_Params{s}, err
 }
 
@@ -1625,7 +1654,7 @@ func NewRootRwDirectory_create_Results(s *capnp.Segment) (RwDirectory_create_Res
 }
 
 func ReadRootRwDirectory_create_Results(msg *capnp.Message) (RwDirectory_create_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_create_Results{root.Struct()}, err
 }
 
@@ -1640,12 +1669,11 @@ func (s RwDirectory_create_Results) File() RwFile {
 }
 
 func (s RwDirectory_create_Results) HasFile() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwDirectory_create_Results) SetFile(v RwFile) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -1675,16 +1703,16 @@ func (s RwDirectory_create_Results_List) String() string {
 	return str
 }
 
-// RwDirectory_create_Results_Promise is a wrapper for a RwDirectory_create_Results promised by a client call.
-type RwDirectory_create_Results_Promise struct{ *capnp.Pipeline }
+// RwDirectory_create_Results_Future is a wrapper for a RwDirectory_create_Results promised by a client call.
+type RwDirectory_create_Results_Future struct{ *capnp.Future }
 
-func (p RwDirectory_create_Results_Promise) Struct() (RwDirectory_create_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_create_Results_Future) Struct() (RwDirectory_create_Results, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_create_Results{s}, err
 }
 
-func (p RwDirectory_create_Results_Promise) File() RwFile {
-	return RwFile{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p RwDirectory_create_Results_Future) File() RwFile {
+	return RwFile{Client: p.Future.Field(0, nil).Client()}
 }
 
 type RwDirectory_mkdir_Params struct{ capnp.Struct }
@@ -1703,7 +1731,7 @@ func NewRootRwDirectory_mkdir_Params(s *capnp.Segment) (RwDirectory_mkdir_Params
 }
 
 func ReadRootRwDirectory_mkdir_Params(msg *capnp.Message) (RwDirectory_mkdir_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_mkdir_Params{root.Struct()}, err
 }
 
@@ -1718,8 +1746,7 @@ func (s RwDirectory_mkdir_Params) Name() (string, error) {
 }
 
 func (s RwDirectory_mkdir_Params) HasName() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwDirectory_mkdir_Params) NameBytes() ([]byte, error) {
@@ -1753,11 +1780,11 @@ func (s RwDirectory_mkdir_Params_List) String() string {
 	return str
 }
 
-// RwDirectory_mkdir_Params_Promise is a wrapper for a RwDirectory_mkdir_Params promised by a client call.
-type RwDirectory_mkdir_Params_Promise struct{ *capnp.Pipeline }
+// RwDirectory_mkdir_Params_Future is a wrapper for a RwDirectory_mkdir_Params promised by a client call.
+type RwDirectory_mkdir_Params_Future struct{ *capnp.Future }
 
-func (p RwDirectory_mkdir_Params_Promise) Struct() (RwDirectory_mkdir_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_mkdir_Params_Future) Struct() (RwDirectory_mkdir_Params, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_mkdir_Params{s}, err
 }
 
@@ -1777,7 +1804,7 @@ func NewRootRwDirectory_mkdir_Results(s *capnp.Segment) (RwDirectory_mkdir_Resul
 }
 
 func ReadRootRwDirectory_mkdir_Results(msg *capnp.Message) (RwDirectory_mkdir_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_mkdir_Results{root.Struct()}, err
 }
 
@@ -1792,12 +1819,11 @@ func (s RwDirectory_mkdir_Results) Dir() RwDirectory {
 }
 
 func (s RwDirectory_mkdir_Results) HasDir() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwDirectory_mkdir_Results) SetDir(v RwDirectory) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -1827,16 +1853,16 @@ func (s RwDirectory_mkdir_Results_List) String() string {
 	return str
 }
 
-// RwDirectory_mkdir_Results_Promise is a wrapper for a RwDirectory_mkdir_Results promised by a client call.
-type RwDirectory_mkdir_Results_Promise struct{ *capnp.Pipeline }
+// RwDirectory_mkdir_Results_Future is a wrapper for a RwDirectory_mkdir_Results promised by a client call.
+type RwDirectory_mkdir_Results_Future struct{ *capnp.Future }
 
-func (p RwDirectory_mkdir_Results_Promise) Struct() (RwDirectory_mkdir_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_mkdir_Results_Future) Struct() (RwDirectory_mkdir_Results, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_mkdir_Results{s}, err
 }
 
-func (p RwDirectory_mkdir_Results_Promise) Dir() RwDirectory {
-	return RwDirectory{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p RwDirectory_mkdir_Results_Future) Dir() RwDirectory {
+	return RwDirectory{Client: p.Future.Field(0, nil).Client()}
 }
 
 type RwDirectory_delete_Params struct{ capnp.Struct }
@@ -1855,7 +1881,7 @@ func NewRootRwDirectory_delete_Params(s *capnp.Segment) (RwDirectory_delete_Para
 }
 
 func ReadRootRwDirectory_delete_Params(msg *capnp.Message) (RwDirectory_delete_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_delete_Params{root.Struct()}, err
 }
 
@@ -1870,8 +1896,7 @@ func (s RwDirectory_delete_Params) Name() (string, error) {
 }
 
 func (s RwDirectory_delete_Params) HasName() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwDirectory_delete_Params) NameBytes() ([]byte, error) {
@@ -1905,11 +1930,11 @@ func (s RwDirectory_delete_Params_List) String() string {
 	return str
 }
 
-// RwDirectory_delete_Params_Promise is a wrapper for a RwDirectory_delete_Params promised by a client call.
-type RwDirectory_delete_Params_Promise struct{ *capnp.Pipeline }
+// RwDirectory_delete_Params_Future is a wrapper for a RwDirectory_delete_Params promised by a client call.
+type RwDirectory_delete_Params_Future struct{ *capnp.Future }
 
-func (p RwDirectory_delete_Params_Promise) Struct() (RwDirectory_delete_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_delete_Params_Future) Struct() (RwDirectory_delete_Params, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_delete_Params{s}, err
 }
 
@@ -1929,7 +1954,7 @@ func NewRootRwDirectory_delete_Results(s *capnp.Segment) (RwDirectory_delete_Res
 }
 
 func ReadRootRwDirectory_delete_Results(msg *capnp.Message) (RwDirectory_delete_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwDirectory_delete_Results{root.Struct()}, err
 }
 
@@ -1960,71 +1985,73 @@ func (s RwDirectory_delete_Results_List) String() string {
 	return str
 }
 
-// RwDirectory_delete_Results_Promise is a wrapper for a RwDirectory_delete_Results promised by a client call.
-type RwDirectory_delete_Results_Promise struct{ *capnp.Pipeline }
+// RwDirectory_delete_Results_Future is a wrapper for a RwDirectory_delete_Results promised by a client call.
+type RwDirectory_delete_Results_Future struct{ *capnp.Future }
 
-func (p RwDirectory_delete_Results_Promise) Struct() (RwDirectory_delete_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwDirectory_delete_Results_Future) Struct() (RwDirectory_delete_Results, error) {
+	s, err := p.Future.Struct()
 	return RwDirectory_delete_Results{s}, err
 }
 
-type File struct{ Client capnp.Client }
+type File struct{ Client *capnp.Client }
 
 // File_TypeID is the unique identifier for the type File.
 const File_TypeID = 0xaa5b133d60884bbd
 
-func (c File) Read(ctx context.Context, params func(File_read_Params) error, opts ...capnp.CallOption) File_read_Results_Promise {
-	if c.Client == nil {
-		return File_read_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c File) Read(ctx context.Context, params func(File_read_Params) error) (File_read_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xaa5b133d60884bbd,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:File",
 			MethodName:    "read",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(File_read_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(File_read_Params{Struct: s}) }
 	}
-	return File_read_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return File_read_Results_Future{Future: ans.Future()}, release
 }
-func (c File) Stat(ctx context.Context, params func(Node_stat_Params) error, opts ...capnp.CallOption) Node_stat_Results_Promise {
-	if c.Client == nil {
-		return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c File) Stat(ctx context.Context, params func(Node_stat_Params) error) (Node_stat_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x955400781a01b061,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
 	}
-	return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Node_stat_Results_Future{Future: ans.Future()}, release
 }
 
+// A File_Server is a File with a local implementation.
 type File_Server interface {
-	Read(File_read) error
+	Read(context.Context, File_read) error
 
-	Stat(Node_stat) error
+	Stat(context.Context, Node_stat) error
 }
 
-func File_ServerToClient(s File_Server) File {
-	c, _ := s.(server.Closer)
-	return File{Client: server.New(File_Methods(nil, s), c)}
+// File_NewServer creates a new Server from an implementation of File_Server.
+func File_NewServer(s File_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(File_Methods(nil, s), s, c, policy)
 }
 
+// File_ServerToClient creates a new Client from an implementation of File_Server.
+// The caller is responsible for calling Release on the returned Client.
+func File_ServerToClient(s File_Server, policy *server.Policy) File {
+	return File{Client: capnp.NewClient(File_NewServer(s, policy))}
+}
+
+// File_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func File_Methods(methods []server.Method, s File_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 2)
@@ -2037,11 +2064,9 @@ func File_Methods(methods []server.Method, s File_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:File",
 			MethodName:    "read",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := File_read{c, opts, File_read_Params{Struct: p}, File_read_Results{Struct: r}}
-			return s.Read(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Read(ctx, File_read{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -2051,22 +2076,29 @@ func File_Methods(methods []server.Method, s File_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Node_stat{c, opts, Node_stat_Params{Struct: p}, Node_stat_Results{Struct: r}}
-			return s.Stat(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Stat(ctx, Node_stat{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	return methods
 }
 
-// File_read holds the arguments for a server call to File.read.
+// File_read holds the state for a server call to File.read.
+// See server.Call for documentation.
 type File_read struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  File_read_Params
-	Results File_read_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c File_read) Args() File_read_Params {
+	return File_read_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c File_read) AllocResults() (File_read_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return File_read_Results{Struct: r}, err
 }
 
 type File_read_Params struct{ capnp.Struct }
@@ -2085,7 +2117,7 @@ func NewRootFile_read_Params(s *capnp.Segment) (File_read_Params, error) {
 }
 
 func ReadRootFile_read_Params(msg *capnp.Message) (File_read_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return File_read_Params{root.Struct()}, err
 }
 
@@ -2116,12 +2148,11 @@ func (s File_read_Params) Sink() util.ByteStream {
 }
 
 func (s File_read_Params) HasSink() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s File_read_Params) SetSink(v util.ByteStream) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -2149,16 +2180,16 @@ func (s File_read_Params_List) String() string {
 	return str
 }
 
-// File_read_Params_Promise is a wrapper for a File_read_Params promised by a client call.
-type File_read_Params_Promise struct{ *capnp.Pipeline }
+// File_read_Params_Future is a wrapper for a File_read_Params promised by a client call.
+type File_read_Params_Future struct{ *capnp.Future }
 
-func (p File_read_Params_Promise) Struct() (File_read_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p File_read_Params_Future) Struct() (File_read_Params, error) {
+	s, err := p.Future.Struct()
 	return File_read_Params{s}, err
 }
 
-func (p File_read_Params_Promise) Sink() util.ByteStream {
-	return util.ByteStream{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p File_read_Params_Future) Sink() util.ByteStream {
+	return util.ByteStream{Client: p.Future.Field(0, nil).Client()}
 }
 
 type File_read_Results struct{ capnp.Struct }
@@ -2177,7 +2208,7 @@ func NewRootFile_read_Results(s *capnp.Segment) (File_read_Results, error) {
 }
 
 func ReadRootFile_read_Results(msg *capnp.Message) (File_read_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return File_read_Results{root.Struct()}, err
 }
 
@@ -2208,137 +2239,127 @@ func (s File_read_Results_List) String() string {
 	return str
 }
 
-// File_read_Results_Promise is a wrapper for a File_read_Results promised by a client call.
-type File_read_Results_Promise struct{ *capnp.Pipeline }
+// File_read_Results_Future is a wrapper for a File_read_Results promised by a client call.
+type File_read_Results_Future struct{ *capnp.Future }
 
-func (p File_read_Results_Promise) Struct() (File_read_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p File_read_Results_Future) Struct() (File_read_Results, error) {
+	s, err := p.Future.Struct()
 	return File_read_Results{s}, err
 }
 
-type RwFile struct{ Client capnp.Client }
+type RwFile struct{ Client *capnp.Client }
 
 // RwFile_TypeID is the unique identifier for the type RwFile.
 const RwFile_TypeID = 0xb4810121539f6e53
 
-func (c RwFile) Write(ctx context.Context, params func(RwFile_write_Params) error, opts ...capnp.CallOption) RwFile_write_Results_Promise {
-	if c.Client == nil {
-		return RwFile_write_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwFile) Write(ctx context.Context, params func(RwFile_write_Params) error) (RwFile_write_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xb4810121539f6e53,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "write",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwFile_write_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwFile_write_Params{Struct: s}) }
 	}
-	return RwFile_write_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwFile_write_Results_Future{Future: ans.Future()}, release
 }
-func (c RwFile) Truncate(ctx context.Context, params func(RwFile_truncate_Params) error, opts ...capnp.CallOption) RwFile_truncate_Results_Promise {
-	if c.Client == nil {
-		return RwFile_truncate_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwFile) Truncate(ctx context.Context, params func(RwFile_truncate_Params) error) (RwFile_truncate_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xb4810121539f6e53,
 			MethodID:      1,
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "truncate",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwFile_truncate_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwFile_truncate_Params{Struct: s}) }
 	}
-	return RwFile_truncate_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwFile_truncate_Results_Future{Future: ans.Future()}, release
 }
-func (c RwFile) SetExec(ctx context.Context, params func(RwFile_setExec_Params) error, opts ...capnp.CallOption) RwFile_setExec_Results_Promise {
-	if c.Client == nil {
-		return RwFile_setExec_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwFile) SetExec(ctx context.Context, params func(RwFile_setExec_Params) error) (RwFile_setExec_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xb4810121539f6e53,
 			MethodID:      2,
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "setExec",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(RwFile_setExec_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(RwFile_setExec_Params{Struct: s}) }
 	}
-	return RwFile_setExec_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return RwFile_setExec_Results_Future{Future: ans.Future()}, release
 }
-func (c RwFile) Read(ctx context.Context, params func(File_read_Params) error, opts ...capnp.CallOption) File_read_Results_Promise {
-	if c.Client == nil {
-		return File_read_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwFile) Read(ctx context.Context, params func(File_read_Params) error) (File_read_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xaa5b133d60884bbd,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:File",
 			MethodName:    "read",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 1}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(File_read_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(File_read_Params{Struct: s}) }
 	}
-	return File_read_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return File_read_Results_Future{Future: ans.Future()}, release
 }
-func (c RwFile) Stat(ctx context.Context, params func(Node_stat_Params) error, opts ...capnp.CallOption) Node_stat_Results_Promise {
-	if c.Client == nil {
-		return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
+func (c RwFile) Stat(ctx context.Context, params func(Node_stat_Params) error) (Node_stat_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0x955400781a01b061,
 			MethodID:      0,
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Options: capnp.NewCallOptions(opts),
 	}
 	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(Node_stat_Params{Struct: s}) }
 	}
-	return Node_stat_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
+	ans, release := c.Client.SendCall(ctx, s)
+	return Node_stat_Results_Future{Future: ans.Future()}, release
 }
 
+// A RwFile_Server is a RwFile with a local implementation.
 type RwFile_Server interface {
-	Write(RwFile_write) error
+	Write(context.Context, RwFile_write) error
 
-	Truncate(RwFile_truncate) error
+	Truncate(context.Context, RwFile_truncate) error
 
-	SetExec(RwFile_setExec) error
+	SetExec(context.Context, RwFile_setExec) error
 
-	Read(File_read) error
+	Read(context.Context, File_read) error
 
-	Stat(Node_stat) error
+	Stat(context.Context, Node_stat) error
 }
 
-func RwFile_ServerToClient(s RwFile_Server) RwFile {
-	c, _ := s.(server.Closer)
-	return RwFile{Client: server.New(RwFile_Methods(nil, s), c)}
+// RwFile_NewServer creates a new Server from an implementation of RwFile_Server.
+func RwFile_NewServer(s RwFile_Server, policy *server.Policy) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(RwFile_Methods(nil, s), s, c, policy)
 }
 
+// RwFile_ServerToClient creates a new Client from an implementation of RwFile_Server.
+// The caller is responsible for calling Release on the returned Client.
+func RwFile_ServerToClient(s RwFile_Server, policy *server.Policy) RwFile {
+	return RwFile{Client: capnp.NewClient(RwFile_NewServer(s, policy))}
+}
+
+// RwFile_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
 func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 	if cap(methods) == 0 {
 		methods = make([]server.Method, 0, 5)
@@ -2351,11 +2372,9 @@ func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "write",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwFile_write{c, opts, RwFile_write_Params{Struct: p}, RwFile_write_Results{Struct: r}}
-			return s.Write(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Write(ctx, RwFile_write{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	methods = append(methods, server.Method{
@@ -2365,11 +2384,9 @@ func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "truncate",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwFile_truncate{c, opts, RwFile_truncate_Params{Struct: p}, RwFile_truncate_Results{Struct: r}}
-			return s.Truncate(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Truncate(ctx, RwFile_truncate{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -2379,11 +2396,9 @@ func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:RwFile",
 			MethodName:    "setExec",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := RwFile_setExec{c, opts, RwFile_setExec_Params{Struct: p}, RwFile_setExec_Results{Struct: r}}
-			return s.SetExec(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.SetExec(ctx, RwFile_setExec{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -2393,11 +2408,9 @@ func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:File",
 			MethodName:    "read",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := File_read{c, opts, File_read_Params{Struct: p}, File_read_Results{Struct: r}}
-			return s.Read(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Read(ctx, File_read{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 0},
 	})
 
 	methods = append(methods, server.Method{
@@ -2407,38 +2420,63 @@ func RwFile_Methods(methods []server.Method, s RwFile_Server) []server.Method {
 			InterfaceName: "filesystem.capnp:Node",
 			MethodName:    "stat",
 		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Node_stat{c, opts, Node_stat_Params{Struct: p}, Node_stat_Results{Struct: r}}
-			return s.Stat(call)
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.Stat(ctx, Node_stat{call})
 		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
 	})
 
 	return methods
 }
 
-// RwFile_write holds the arguments for a server call to RwFile.write.
+// RwFile_write holds the state for a server call to RwFile.write.
+// See server.Call for documentation.
 type RwFile_write struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwFile_write_Params
-	Results RwFile_write_Results
+	*server.Call
 }
 
-// RwFile_truncate holds the arguments for a server call to RwFile.truncate.
+// Args returns the call's arguments.
+func (c RwFile_write) Args() RwFile_write_Params {
+	return RwFile_write_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwFile_write) AllocResults() (RwFile_write_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return RwFile_write_Results{Struct: r}, err
+}
+
+// RwFile_truncate holds the state for a server call to RwFile.truncate.
+// See server.Call for documentation.
 type RwFile_truncate struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwFile_truncate_Params
-	Results RwFile_truncate_Results
+	*server.Call
 }
 
-// RwFile_setExec holds the arguments for a server call to RwFile.setExec.
+// Args returns the call's arguments.
+func (c RwFile_truncate) Args() RwFile_truncate_Params {
+	return RwFile_truncate_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwFile_truncate) AllocResults() (RwFile_truncate_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return RwFile_truncate_Results{Struct: r}, err
+}
+
+// RwFile_setExec holds the state for a server call to RwFile.setExec.
+// See server.Call for documentation.
 type RwFile_setExec struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  RwFile_setExec_Params
-	Results RwFile_setExec_Results
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c RwFile_setExec) Args() RwFile_setExec_Params {
+	return RwFile_setExec_Params{Struct: c.Call.Args()}
+}
+
+// AllocResults allocates the results struct.
+func (c RwFile_setExec) AllocResults() (RwFile_setExec_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return RwFile_setExec_Results{Struct: r}, err
 }
 
 type RwFile_write_Params struct{ capnp.Struct }
@@ -2457,7 +2495,7 @@ func NewRootRwFile_write_Params(s *capnp.Segment) (RwFile_write_Params, error) {
 }
 
 func ReadRootRwFile_write_Params(msg *capnp.Message) (RwFile_write_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_write_Params{root.Struct()}, err
 }
 
@@ -2496,11 +2534,11 @@ func (s RwFile_write_Params_List) String() string {
 	return str
 }
 
-// RwFile_write_Params_Promise is a wrapper for a RwFile_write_Params promised by a client call.
-type RwFile_write_Params_Promise struct{ *capnp.Pipeline }
+// RwFile_write_Params_Future is a wrapper for a RwFile_write_Params promised by a client call.
+type RwFile_write_Params_Future struct{ *capnp.Future }
 
-func (p RwFile_write_Params_Promise) Struct() (RwFile_write_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_write_Params_Future) Struct() (RwFile_write_Params, error) {
+	s, err := p.Future.Struct()
 	return RwFile_write_Params{s}, err
 }
 
@@ -2520,7 +2558,7 @@ func NewRootRwFile_write_Results(s *capnp.Segment) (RwFile_write_Results, error)
 }
 
 func ReadRootRwFile_write_Results(msg *capnp.Message) (RwFile_write_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_write_Results{root.Struct()}, err
 }
 
@@ -2535,12 +2573,11 @@ func (s RwFile_write_Results) Sink() util.ByteStream {
 }
 
 func (s RwFile_write_Results) HasSink() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
+	return s.Struct.HasPtr(0)
 }
 
 func (s RwFile_write_Results) SetSink(v util.ByteStream) error {
-	if v.Client == nil {
+	if !v.Client.IsValid() {
 		return s.Struct.SetPtr(0, capnp.Ptr{})
 	}
 	seg := s.Segment()
@@ -2570,16 +2607,16 @@ func (s RwFile_write_Results_List) String() string {
 	return str
 }
 
-// RwFile_write_Results_Promise is a wrapper for a RwFile_write_Results promised by a client call.
-type RwFile_write_Results_Promise struct{ *capnp.Pipeline }
+// RwFile_write_Results_Future is a wrapper for a RwFile_write_Results promised by a client call.
+type RwFile_write_Results_Future struct{ *capnp.Future }
 
-func (p RwFile_write_Results_Promise) Struct() (RwFile_write_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_write_Results_Future) Struct() (RwFile_write_Results, error) {
+	s, err := p.Future.Struct()
 	return RwFile_write_Results{s}, err
 }
 
-func (p RwFile_write_Results_Promise) Sink() util.ByteStream {
-	return util.ByteStream{Client: p.Pipeline.GetPipeline(0).Client()}
+func (p RwFile_write_Results_Future) Sink() util.ByteStream {
+	return util.ByteStream{Client: p.Future.Field(0, nil).Client()}
 }
 
 type RwFile_truncate_Params struct{ capnp.Struct }
@@ -2598,7 +2635,7 @@ func NewRootRwFile_truncate_Params(s *capnp.Segment) (RwFile_truncate_Params, er
 }
 
 func ReadRootRwFile_truncate_Params(msg *capnp.Message) (RwFile_truncate_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_truncate_Params{root.Struct()}, err
 }
 
@@ -2637,11 +2674,11 @@ func (s RwFile_truncate_Params_List) String() string {
 	return str
 }
 
-// RwFile_truncate_Params_Promise is a wrapper for a RwFile_truncate_Params promised by a client call.
-type RwFile_truncate_Params_Promise struct{ *capnp.Pipeline }
+// RwFile_truncate_Params_Future is a wrapper for a RwFile_truncate_Params promised by a client call.
+type RwFile_truncate_Params_Future struct{ *capnp.Future }
 
-func (p RwFile_truncate_Params_Promise) Struct() (RwFile_truncate_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_truncate_Params_Future) Struct() (RwFile_truncate_Params, error) {
+	s, err := p.Future.Struct()
 	return RwFile_truncate_Params{s}, err
 }
 
@@ -2661,7 +2698,7 @@ func NewRootRwFile_truncate_Results(s *capnp.Segment) (RwFile_truncate_Results, 
 }
 
 func ReadRootRwFile_truncate_Results(msg *capnp.Message) (RwFile_truncate_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_truncate_Results{root.Struct()}, err
 }
 
@@ -2692,11 +2729,11 @@ func (s RwFile_truncate_Results_List) String() string {
 	return str
 }
 
-// RwFile_truncate_Results_Promise is a wrapper for a RwFile_truncate_Results promised by a client call.
-type RwFile_truncate_Results_Promise struct{ *capnp.Pipeline }
+// RwFile_truncate_Results_Future is a wrapper for a RwFile_truncate_Results promised by a client call.
+type RwFile_truncate_Results_Future struct{ *capnp.Future }
 
-func (p RwFile_truncate_Results_Promise) Struct() (RwFile_truncate_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_truncate_Results_Future) Struct() (RwFile_truncate_Results, error) {
+	s, err := p.Future.Struct()
 	return RwFile_truncate_Results{s}, err
 }
 
@@ -2716,7 +2753,7 @@ func NewRootRwFile_setExec_Params(s *capnp.Segment) (RwFile_setExec_Params, erro
 }
 
 func ReadRootRwFile_setExec_Params(msg *capnp.Message) (RwFile_setExec_Params, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_setExec_Params{root.Struct()}, err
 }
 
@@ -2755,11 +2792,11 @@ func (s RwFile_setExec_Params_List) String() string {
 	return str
 }
 
-// RwFile_setExec_Params_Promise is a wrapper for a RwFile_setExec_Params promised by a client call.
-type RwFile_setExec_Params_Promise struct{ *capnp.Pipeline }
+// RwFile_setExec_Params_Future is a wrapper for a RwFile_setExec_Params promised by a client call.
+type RwFile_setExec_Params_Future struct{ *capnp.Future }
 
-func (p RwFile_setExec_Params_Promise) Struct() (RwFile_setExec_Params, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_setExec_Params_Future) Struct() (RwFile_setExec_Params, error) {
+	s, err := p.Future.Struct()
 	return RwFile_setExec_Params{s}, err
 }
 
@@ -2779,7 +2816,7 @@ func NewRootRwFile_setExec_Results(s *capnp.Segment) (RwFile_setExec_Results, er
 }
 
 func ReadRootRwFile_setExec_Results(msg *capnp.Message) (RwFile_setExec_Results, error) {
-	root, err := msg.RootPtr()
+	root, err := msg.Root()
 	return RwFile_setExec_Results{root.Struct()}, err
 }
 
@@ -2810,11 +2847,11 @@ func (s RwFile_setExec_Results_List) String() string {
 	return str
 }
 
-// RwFile_setExec_Results_Promise is a wrapper for a RwFile_setExec_Results promised by a client call.
-type RwFile_setExec_Results_Promise struct{ *capnp.Pipeline }
+// RwFile_setExec_Results_Future is a wrapper for a RwFile_setExec_Results promised by a client call.
+type RwFile_setExec_Results_Future struct{ *capnp.Future }
 
-func (p RwFile_setExec_Results_Promise) Struct() (RwFile_setExec_Results, error) {
-	s, err := p.Pipeline.Struct()
+func (p RwFile_setExec_Results_Future) Struct() (RwFile_setExec_Results, error) {
+	s, err := p.Future.Struct()
 	return RwFile_setExec_Results{s}, err
 }
 

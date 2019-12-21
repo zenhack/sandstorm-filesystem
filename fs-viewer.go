@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"zombiezen.com/go/capnproto2"
 
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 	"zenhack.net/go/sandstorm-filesystem/filesystem/httpfs"
@@ -38,12 +37,14 @@ func initHTTPFS() {
 			}
 
 			sessionCtx := grain_ctx.GetSessionContext(req.Context())
-			results, err := sessionCtx.ClaimRequest(
+			res, release := sessionCtx.ClaimRequest(
 				context.TODO(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {
 					p.SetRequestToken(string(buf))
 					return nil
-				}).Struct()
+				})
+			defer release()
+			results, err := res.Struct()
 			if err != nil {
 				badReq(w, "claim request", err)
 				return
@@ -54,7 +55,7 @@ func initHTTPFS() {
 				return
 			}
 			rootDir = &httpfs.FileSystem{Dir: filesystem.Directory{
-				Client: capnp.ToInterface(capability).Client(),
+				Client: capability.Interface().Client(),
 			}}
 		})
 

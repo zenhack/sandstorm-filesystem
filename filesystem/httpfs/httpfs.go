@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
-	util_capnp "zenhack.net/go/sandstorm/capnp/util"
-	"zenhack.net/go/sandstorm/util"
+	"zenhack.net/go/sandstorm/exp/util/bytestream"
+
+	"zombiezen.com/go/capnproto2"
 )
 
 var (
@@ -43,7 +44,7 @@ func (f *File) Read(buf []byte) (n int, err error) {
 	file.Read(context.TODO(), func(p filesystem.File_read_Params) error {
 		p.SetStartAt(f.pos)
 		p.SetAmount(uint64(len(buf)))
-		p.SetSink(util_capnp.ByteStream_ServerToClient(&util.WriteCloserByteStream{w}))
+		p.SetSink(bytestream.FromWriteCloser(w, nil))
 		return nil
 	})
 	n, err = io.ReadFull(r, buf)
@@ -100,7 +101,7 @@ func (s *fiStream) Close() error {
 	return nil
 }
 
-func (s *fiStream) Done(p filesystem.Directory_Entry_Stream_done) error {
+func (s *fiStream) Done(ctx context.Context, p filesystem.Directory_Entry_Stream_done) error {
 	if !s.isClosed {
 		s.isClosed = true
 		s.done <- struct{}{}
@@ -108,11 +109,11 @@ func (s *fiStream) Done(p filesystem.Directory_Entry_Stream_done) error {
 	return nil
 }
 
-func (s *fiStream) Push(p filesystem.Directory_Entry_Stream_push) error {
+func (s *fiStream) Push(ctx context.Context, p filesystem.Directory_Entry_Stream_push) error {
 	if s.isClosed {
 		return s.err
 	}
-	entries, err := p.Params.Entries()
+	entries, err := p.Args().Entries()
 	if err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	filesystem.Directory{Client: f.Node.Client}.List(
 		context.TODO(),
 		func(p filesystem.Directory_list_Params) error {
-			p.SetStream(filesystem.Directory_Entry_Stream_ServerToClient(ret))
+			p.SetStream(filesystem.Directory_Entry_Stream_ServerToClient(ret, nil))
 			return nil
 		})
 	<-ret.done
@@ -218,38 +219,39 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 		// strip off the path prefix
 		parts = parts[1:]
 	}
-	toClose := make([]filesystem.Node, len(parts))
+	toRelease := make([]capnp.ReleaseFunc, 0, len(parts))
 
 	var node filesystem.Node
 	var dir filesystem.Directory
 	node = filesystem.Node{Client: fs.Dir.Client}
 	dir.Client = node.Client
 
-	for i, nodeName := range parts {
-		node = dir.Walk(context.TODO(), func(p filesystem.Directory_walk_Params) error {
+	defer func() {
+		// Don't do the last one, as we're going to return that one.
+		for _, release := range toRelease[:len(toRelease)-1] {
+			release()
+		}
+	}()
+
+	for _, nodeName := range parts {
+		res, release := dir.Walk(context.TODO(), func(p filesystem.Directory_walk_Params) error {
 			p.SetName(nodeName)
 			return nil
-		}).Node()
-		toClose[i] = node
+		})
+		node := res.Node()
+		toRelease = append(toRelease, release)
 		dir = filesystem.Directory{node.Client}
 	}
-	/*
-		if len(toClose) != 0 {
-			for i := range toClose[:len(toClose)-1] {
-				toClose[i].Client.Close()
-			}
-		}
-	*/
-	ret, err := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
+	ret, release := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
 		return nil
-	}).Struct()
+	})
+	defer release()
+
+	info, err := ret.Info().Struct()
 	if err != nil {
 		return nil, err
 	}
-	info, err := ret.Info()
-	if err != nil {
-		return nil, err
-	}
+
 	var retName string
 	if len(parts) == 0 {
 		retName = ""

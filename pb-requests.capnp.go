@@ -10,8 +10,8 @@ import (
 
 // Constants defined in pb-requests.capnp.
 var (
-	DirectoryReq   = powerbox.PowerboxDescriptor{Struct: capnp.MustUnmarshalRootPtr(x_f7eee63280552269[0:56]).Struct()}
-	RwDirectoryReq = powerbox.PowerboxDescriptor{Struct: capnp.MustUnmarshalRootPtr(x_f7eee63280552269[56:112]).Struct()}
+	DirectoryReq   = powerbox.PowerboxDescriptor{Struct: capnp.MustUnmarshalRoot(x_f7eee63280552269[0:56]).Struct()}
+	RwDirectoryReq = powerbox.PowerboxDescriptor{Struct: capnp.MustUnmarshalRoot(x_f7eee63280552269[56:112]).Struct()}
 )
 
 const schema_f7eee63280552269 = "x\xda\x12X\xed\xc0d\xc8\xaa\xce\xc2\xc0\x10h\xc0\xca" +

@@ -3,6 +3,7 @@
 package local
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,9 +11,10 @@ import (
 	"strings"
 
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
+
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
-	util_capnp "zenhack.net/go/sandstorm/capnp/util"
-	"zenhack.net/go/sandstorm/util"
+	"zenhack.net/go/sandstorm/exp/util/bytestream"
+
 	"zombiezen.com/go/capnproto2"
 	"zombiezen.com/go/capnproto2/server"
 )
@@ -44,21 +46,25 @@ type Node struct {
 	Path       string
 }
 
-func (n *Node) Save(p grain_capnp.AppPersistent_save) error {
+func (n *Node) Save(ctx context.Context, p grain_capnp.AppPersistent_save) error {
 	data, err := json.Marshal(n)
 	if err != nil {
 		return err
 	}
-	u8list, err := capnp.NewData(p.Results.Struct.Segment(), data)
+	res, err := p.AllocResults()
 	if err != nil {
 		return err
 	}
-	p.Results.SetObjectIdPtr(u8list.List.ToPtr())
+	u8list, err := capnp.NewData(res.Struct.Segment(), data)
+	if err != nil {
+		return err
+	}
+	res.SetObjectId(u8list.List.ToPtr())
 	return nil
 }
 
 func (n *Node) Restore(p grain_capnp.MainView_restore) error {
-	ptr, err := p.Params.ObjectIdPtr()
+	ptr, err := p.Args().ObjectId()
 	if err != nil {
 		return err
 	}
@@ -66,18 +72,26 @@ func (n *Node) Restore(p grain_capnp.MainView_restore) error {
 	if err != nil {
 		return err
 	}
-	capId := p.Results.Struct.Segment().Message().AddCap(n.MakeClient().Client)
-	p.Results.SetCapPtr(capnp.NewInterface(p.Results.Struct.Segment(), capId).ToPtr())
+	res, err := p.AllocResults()
+	if err != nil {
+		return err
+	}
+	capId := res.Struct.Segment().Message().AddCap(n.MakeClient().Client)
+	res.SetCap(capnp.NewInterface(res.Struct.Segment(), capId).ToPtr())
 	return nil
 }
 
-func (n *Node) Stat(p filesystem.Node_stat) error {
+func (n *Node) Stat(ctx context.Context, p filesystem.Node_stat) error {
 	fi, err := os.Stat(n.Path)
 	if err != nil {
 		// TODO: think about the right way to handle this.
 		return err
 	}
-	info, err := p.Results.NewInfo()
+	res, err := p.AllocResults()
+	if err != nil {
+		return err
+	}
+	info, err := res.NewInfo()
 	if err != nil {
 		return err
 	}
@@ -92,8 +106,8 @@ func (n *Node) Stat(p filesystem.Node_stat) error {
 	return nil
 }
 
-func (d *Node) List(p filesystem.Directory_list) error {
-	stream := p.Params.Stream()
+func (d *Node) List(ctx context.Context, p filesystem.Directory_list) error {
+	stream := p.Args().Stream()
 	file, err := os.Open(d.Path)
 	if err != nil {
 		// err might contain private info, e.g. where the directory
@@ -104,13 +118,13 @@ func (d *Node) List(p filesystem.Directory_list) error {
 	defer file.Close()
 	maxBufSize := 1024
 
-	for p.Ctx.Err() == nil {
+	for ctx.Err() == nil {
 		fis, err := file.Readdir(maxBufSize)
 		if err != nil && err != io.EOF {
 			return err
 		}
 
-		stream.Push(p.Ctx, func(p filesystem.Directory_Entry_Stream_push_Params) error {
+		stream.Push(ctx, func(p filesystem.Directory_Entry_Stream_push_Params) error {
 			list, err := p.NewEntries(int32(len(fis)))
 			if err != nil {
 				return err
@@ -140,15 +154,15 @@ func (d *Node) List(p filesystem.Directory_list) error {
 		}
 	}
 
-	stream.Done(p.Ctx, func(filesystem.Directory_Entry_Stream_done_Params) error {
+	stream.Done(ctx, func(filesystem.Directory_Entry_Stream_done_Params) error {
 		return nil
 	})
 
 	return nil
 }
 
-func (d *Node) Walk(p filesystem.Directory_walk) error {
-	name, err := p.Params.Name()
+func (d *Node) Walk(ctx context.Context, p filesystem.Directory_walk) error {
+	name, err := p.Args().Name()
 	if err != nil {
 		return err
 	}
@@ -170,12 +184,17 @@ func (d *Node) Walk(p filesystem.Directory_walk) error {
 		Executable: fi.Mode()&0100 != 0,
 	}
 
-	p.Results.SetNode(node.MakeClient())
+	res, err := p.AllocResults()
+	if err != nil {
+		return err
+	}
+
+	res.SetNode(node.MakeClient())
 	return nil
 }
 
-func (d *Node) Create(p filesystem.RwDirectory_create) error {
-	name, err := p.Params.Name()
+func (d *Node) Create(ctx context.Context, p filesystem.RwDirectory_create) error {
+	name, err := p.Args().Name()
 	if err != nil {
 		return err
 	}
@@ -185,7 +204,7 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 
 	node := Node{
 		Path:       d.Path + "/" + name,
-		Executable: p.Params.Executable(),
+		Executable: p.Args().Executable(),
 		Writable:   true,
 	}
 
@@ -200,14 +219,18 @@ func (d *Node) Create(p filesystem.RwDirectory_create) error {
 	}
 	file.Close()
 
-	p.Results.SetFile(filesystem.RwFile{
+	res, err := p.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetFile(filesystem.RwFile{
 		Client: node.MakeClient().Client,
 	})
 	return nil
 }
 
-func (d *Node) Mkdir(p filesystem.RwDirectory_mkdir) error {
-	name, err := p.Params.Name()
+func (d *Node) Mkdir(ctx context.Context, p filesystem.RwDirectory_mkdir) error {
+	name, err := p.Args().Name()
 	if err != nil {
 		return err
 	}
@@ -217,7 +240,7 @@ func (d *Node) Mkdir(p filesystem.RwDirectory_mkdir) error {
 	return os.Mkdir(d.Path+"/"+name, 0700)
 }
 
-func (d *Node) Delete(p filesystem.RwDirectory_delete) error {
+func (d *Node) Delete(ctx context.Context, p filesystem.RwDirectory_delete) error {
 	return NotImplemented
 }
 
@@ -244,12 +267,20 @@ func (n *Node) MakeClient() filesystem.Node {
 		}
 	}
 	return filesystem.Node{
-		Client: server.New(append(methods, grain_capnp.AppPersistent_Methods(nil, n)...), nil),
+		Client: capnp.NewClient(server.New(
+			append(
+				methods,
+				grain_capnp.AppPersistent_Methods(nil, n)...,
+			),
+			n,
+			nil,
+			nil,
+		)),
 	}
 }
 
-func (f *Node) Write(p filesystem.RwFile_write) error {
-	startAt := p.Params.StartAt()
+func (f *Node) Write(ctx context.Context, p filesystem.RwFile_write) error {
+	startAt := p.Args().StartAt()
 
 	if startAt <= -2 {
 		return InvalidArgument
@@ -268,15 +299,17 @@ func (f *Node) Write(p filesystem.RwFile_write) error {
 		file.Close()
 		return err
 	}
-	bs := util_capnp.ByteStream_ServerToClient(&util.WriteCloserByteStream{
-		WC: file,
-	})
-	p.Results.SetSink(bs)
+	bs := bytestream.FromWriteCloser(file, nil)
+	res, err := p.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetSink(bs)
 	return nil
 }
 
-func (f *Node) SetExec(p filesystem.RwFile_setExec) error {
-	exec := p.Params.Exec()
+func (f *Node) SetExec(ctx context.Context, p filesystem.RwFile_setExec) error {
+	exec := p.Args().Exec()
 	fi, err := os.Stat(f.Path)
 	// FIXME: censor error like with OpenFailed.
 	if err != nil {
@@ -291,21 +324,21 @@ func (f *Node) SetExec(p filesystem.RwFile_setExec) error {
 	}
 }
 
-func (f *Node) Truncate(p filesystem.RwFile_truncate) error {
+func (f *Node) Truncate(ctx context.Context, p filesystem.RwFile_truncate) error {
 	// FIXME: cast/overflow issues.
-	if err := os.Truncate(f.Path, int64(p.Params.Size())); err != nil {
+	if err := os.Truncate(f.Path, int64(p.Args().Size())); err != nil {
 		return OpenFailed
 	}
 	return nil
 }
 
-func (f *Node) Read(p filesystem.File_read) error {
-	startAt := p.Params.StartAt()
+func (f *Node) Read(ctx context.Context, p filesystem.File_read) error {
+	startAt := p.Args().StartAt()
 	if startAt < 0 {
 		return InvalidArgument
 	}
 
-	amount := int64(p.Params.Amount())
+	amount := int64(p.Args().Amount())
 	if amount < 0 {
 		// The go api expects a signed value, so if we get something
 		// greater than an int64 can represent, we just say "read the
@@ -313,7 +346,7 @@ func (f *Node) Read(p filesystem.File_read) error {
 		// going to do the same thing anyway.
 		amount = 0
 	}
-	sink := p.Params.Sink()
+	sink := p.Args().Sink()
 
 	file, err := os.Open(f.Path)
 	if err != nil {
@@ -321,7 +354,7 @@ func (f *Node) Read(p filesystem.File_read) error {
 	}
 	defer file.Close()
 
-	wc := util.ByteStreamWriteCloser{p.Ctx, sink}
+	wc := bytestream.ToWriteCloser(ctx, sink)
 	_, err = file.Seek(startAt, 0)
 	r := io.Reader(file)
 	if amount != 0 {
