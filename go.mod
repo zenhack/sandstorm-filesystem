@@ -9,4 +9,4 @@ require (
 	zombiezen.com/go/capnproto2 v2.17.1-0.20180404044107-e89f9b7f0213+incompatible
 )
 
-replace zenhack.net/go/sandstorm => /home/isd/src/pub/go.sandstorm
+replace zenhack.net/go/sandstorm => ../go.sandstorm

@@ -13,6 +13,7 @@ import (
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
+	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
 	"zenhack.net/go/sandstorm/exp/util/bytestream"
 
 	"zombiezen.com/go/capnproto2"
@@ -63,7 +64,7 @@ func (n *Node) Save(ctx context.Context, p grain_capnp.AppPersistent_save) error
 	return nil
 }
 
-func (n *Node) Restore(p grain_capnp.MainView_restore) error {
+func (n *Node) Restore(p bridge_capnp.AppHooks_restore) error {
 	ptr, err := p.Args().ObjectId()
 	if err != nil {
 		return err

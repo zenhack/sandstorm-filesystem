@@ -8,19 +8,23 @@ import (
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 	"zenhack.net/go/sandstorm-filesystem/filesystem/local"
 
-	"zenhack.net/go/sandstorm/exp/websession"
-
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
+	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
+	sandstormhttpbridge "zenhack.net/go/sandstorm/exp/sandstormhttpbridge"
 
 	"zombiezen.com/go/capnproto2"
 	"zombiezen.com/go/capnproto2/pogs"
 )
 
 type LocalFS struct {
-	*websession.HandlerUiView
+	bridgePromise *BridgePromise
 }
 
-func (fs *LocalFS) GetViewInfo(ctx context.Context, p grain_capnp.UiView_getViewInfo) error {
+func (fs *LocalFS) getBridge() bridge_capnp.SandstormHttpBridge {
+	return fs.bridgePromise.Wait()
+}
+
+func (fs *LocalFS) GetViewInfo(ctx context.Context, p bridge_capnp.AppHooks_getViewInfo) error {
 	res, err := p.AllocResults()
 	if err != nil {
 		return err
@@ -35,19 +39,18 @@ func (fs *LocalFS) GetViewInfo(ctx context.Context, p grain_capnp.UiView_getView
 	return nil
 }
 
-func (fs *LocalFS) Restore(ctx context.Context, p grain_capnp.MainView_restore) error {
+func (fs *LocalFS) Restore(ctx context.Context, p bridge_capnp.AppHooks_restore) error {
 	node := &local.Node{}
 	return node.Restore(p)
 }
 
-func (fs *LocalFS) Drop(ctx context.Context, p grain_capnp.MainView_drop) error {
+func (fs *LocalFS) Drop(ctx context.Context, p bridge_capnp.AppHooks_drop) error {
 	return nil
 }
 
-func handleLocalFS(w http.ResponseWriter, req *http.Request) {
+func (fs *LocalFS) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	p := websession.GetSessionData(req)
-	if p.Which() != websession.SessionData_Which_request {
+	if req.Header.Get("X-Sandstorm-Session-Type") != "request" {
 		// Not a request session.
 		w.Write([]byte("This grain doesn't provide much of a user " +
 			"interface (this is it), but you can request a " +
@@ -56,15 +59,19 @@ func handleLocalFS(w http.ResponseWriter, req *http.Request) {
 			"viewer grain types from this app."))
 		return
 	}
-	sessionContext := p.Context()
-	requestInfo, err := p.Request().RequestInfo()
-	if err != nil || requestInfo.Len() < 1 {
+
+	bridge := fs.getBridge()
+
+	sessionCtx := sandstormhttpbridge.GetSessionContext(bridge, req)
+	requestInfo := sandstormhttpbridge.GetSessionRequest(bridge, req)
+
+	if requestInfo.Len() < 1 {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Bad Request"))
 		return
 	}
 	descriptor := requestInfo.At(0)
-	res, release := sessionContext.FulfillRequest(
+	res, release := sessionCtx.FulfillRequest(
 		ctx,
 		func(p grain_capnp.SessionContext_fulfillRequest_Params) error {
 			// TODO: limit to the thing the user actually asked for; if they didn't ask
@@ -90,14 +97,12 @@ func handleLocalFS(w http.ResponseWriter, req *http.Request) {
 			return nil
 		})
 	defer release()
-	_, err = res.Struct()
+	_, err := res.Struct()
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	ret, release := sessionContext.Close(ctx, func(p grain_capnp.SessionContext_close_Params) error {
-		return nil
-	})
+	ret, release := sessionCtx.Close(ctx, nil)
 	defer release()
 	_, err = ret.Struct()
 	if err != nil {
@@ -105,14 +110,12 @@ func handleLocalFS(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func initLocalFS() {
-	// Make sure our shared directory exists.
-	chkfatal(os.MkdirAll("/var/shared-dir", 0700))
-	http.HandleFunc("/", handleLocalFS)
-}
-
 // Returns a "local fs" grain, which allows other grains to access
 // its files.
-func NewLocalFS() *LocalFS {
-	return &LocalFS{&websession.HandlerUiView{http.DefaultServeMux}}
+func initLocalFS(p *BridgePromise) *LocalFS {
+	// Make sure our shared directory exists.
+	chkfatal(os.MkdirAll("/var/shared-dir", 0700))
+	localFS := &LocalFS{bridgePromise: p}
+	http.Handle("/", localFS)
+	return localFS
 }

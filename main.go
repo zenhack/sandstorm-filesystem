@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"io/ioutil"
+	"net"
+	"net/http"
 	"os"
 
-	"zenhack.net/go/sandstorm/exp/websession"
+	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
+	"zenhack.net/go/sandstorm/exp/sandstormhttpbridge"
 )
 
 func chkfatal(err error) {
@@ -37,19 +40,26 @@ func getAction() string {
 
 func main() {
 	ctx := context.Background()
-
 	action := getAction()
 
 	switch action {
 	case "localfs":
-		initLocalFS()
-		panic(websession.ListenAndServe(ctx, NewLocalFS(), nil))
+		p, f := NewBridgePromise()
+		appHooks := bridge_capnp.AppHooks_ServerToClient(initLocalFS(p), nil)
+		bridge, err := sandstormhttpbridge.ConnectWithHooks(ctx, appHooks)
+		chkfatal(err)
+		f <- bridge
 	case "httpview":
-		initHTTPFS()
+		bridge, err := sandstormhttpbridge.Connect(ctx)
+		chkfatal(err)
+		initHTTPFS(bridge)
 	case "zip-uploader":
-		initZipUploader()
+		bridge, err := sandstormhttpbridge.Connect(ctx)
+		chkfatal(err)
+		initZipUploader(bridge)
 	default:
 		panic("Unexpected action type: " + action)
 	}
-	panic(websession.ListenAndServe(nil, nil, nil))
+	listenAddr := net.JoinHostPort("", os.Getenv("LISTEN_PORT"))
+	panic(http.ListenAndServe(listenAddr, nil))
 }

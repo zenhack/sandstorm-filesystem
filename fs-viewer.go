@@ -12,14 +12,14 @@ import (
 	"zenhack.net/go/sandstorm-filesystem/filesystem/httpfs"
 
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
-	grain_ctx "zenhack.net/go/sandstorm/grain/context"
+	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
 )
 
 var (
 	rootDir *httpfs.FileSystem
 )
 
-func initHTTPFS() {
+func initHTTPFS(bridge bridge_capnp.SandstormHttpBridge) {
 	r := mux.NewRouter()
 
 	badReq := func(w http.ResponseWriter, ctx string, err error) {
@@ -36,7 +36,15 @@ func initHTTPFS() {
 				return
 			}
 
-			sessionCtx := grain_ctx.GetSessionContext(req.Context())
+			getCtxResultsPromise, relSessionCtx := bridge.GetSessionContext(req.Context(), nil)
+			defer relSessionCtx()
+			getCtxResults, err := getCtxResultsPromise.Struct()
+			if err != nil {
+				log.Print("Error waiting on session context:", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			sessionCtx := getCtxResults.Context()
 			res, release := sessionCtx.ClaimRequest(
 				context.TODO(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {

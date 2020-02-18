@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"io"
 	"io/ioutil"
 	"log"
@@ -15,7 +14,8 @@ import (
 	"zenhack.net/go/sandstorm-filesystem/filesystem"
 
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
-	grain_ctx "zenhack.net/go/sandstorm/grain/context"
+	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
+	"zenhack.net/go/sandstorm/exp/sandstormhttpbridge"
 
 	"zenhack.net/go/sandstorm/exp/util/bytestream"
 )
@@ -24,7 +24,7 @@ var (
 	rootRwDir filesystem.RwDirectory
 )
 
-func initZipUploader() {
+func initZipUploader(bridge bridge_capnp.SandstormHttpBridge) {
 	r := mux.NewRouter()
 
 	badReq := func(w http.ResponseWriter, ctx string, err error) {
@@ -41,9 +41,9 @@ func initZipUploader() {
 				return
 			}
 
-			sessionCtx := grain_ctx.GetSessionContext(req.Context())
+			sessionCtx := sandstormhttpbridge.GetSessionContext(bridge, req)
 			res, release := sessionCtx.ClaimRequest(
-				context.TODO(),
+				req.Context(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {
 					p.SetRequestToken(string(buf))
 					return nil
@@ -56,7 +56,7 @@ func initZipUploader() {
 			}
 			capability, err := results.Cap()
 			if err != nil {
-				log.Print("Error claiming network cap:", err)
+				log.Print("Error claiming filesystem cap:", err)
 				return
 			}
 			rootRwDir = filesystem.RwDirectory{
