@@ -20,6 +20,20 @@ var (
 	TooManyEntries  = errors.New("Stream received too many entries")
 )
 
+// Copy StatInfo. Useful to when the original is going to be reclaimed.
+func cloneInfo(info filesystem.StatInfo) filesystem.StatInfo {
+	msg, _, err := capnp.NewMessage(capnp.SingleSegment(nil))
+	if err != nil {
+		panic(err)
+	}
+	msg.SetRoot(info.Struct.ToPtr())
+	newInfo, err := filesystem.ReadRootStatInfo(msg)
+	if err != nil {
+		panic(err)
+	}
+	return newInfo
+}
+
 type FileSystem struct {
 	Dir filesystem.Directory
 }
@@ -135,7 +149,7 @@ func (s *fiStream) Push(ctx context.Context, p filesystem.Directory_Entry_Stream
 		}
 		s.buf = append(s.buf, &FileInfo{
 			name: name,
-			info: info,
+			info: cloneInfo(info),
 		})
 		s.have++
 	}
@@ -227,11 +241,7 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 	dir.Client = node.Client
 
 	defer func() {
-		if len(toRelease) == 0 {
-			return
-		}
-		// Don't do the last one, as we're going to return that one.
-		for _, release := range toRelease[:len(toRelease)-1] {
+		for _, release := range toRelease {
 			release()
 		}
 	}()
@@ -245,10 +255,9 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 		toRelease = append(toRelease, release)
 		dir = filesystem.Directory{node.Client}
 	}
-	ret, release := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
+	ret, _ := node.Stat(context.TODO(), func(p filesystem.Node_stat_Params) error {
 		return nil
 	})
-	defer release()
 
 	info, err := ret.Info().Struct()
 	if err != nil {
@@ -265,7 +274,7 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 		Node: node,
 		Info: &FileInfo{
 			name: retName,
-			info: info,
+			info: cloneInfo(info),
 		},
 	}, nil
 }
