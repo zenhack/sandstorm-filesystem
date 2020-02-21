@@ -227,6 +227,9 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 	dir.Client = node.Client
 
 	defer func() {
+		if len(toRelease) == 0 {
+			return
+		}
 		// Don't do the last one, as we're going to return that one.
 		for _, release := range toRelease[:len(toRelease)-1] {
 			release()

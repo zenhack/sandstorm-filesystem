@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 
 	grain_capnp "zenhack.net/go/sandstorm/capnp/grain"
 	bridge_capnp "zenhack.net/go/sandstorm/capnp/sandstormhttpbridge"
+
+	"zenhack.net/go/sandstorm/exp/sandstormhttpbridge"
 )
 
 var (
@@ -36,22 +37,13 @@ func initHTTPFS(bridge bridge_capnp.SandstormHttpBridge) {
 				return
 			}
 
-			getCtxResultsPromise, relSessionCtx := bridge.GetSessionContext(req.Context(), nil)
-			defer relSessionCtx()
-			getCtxResults, err := getCtxResultsPromise.Struct()
-			if err != nil {
-				log.Print("Error waiting on session context:", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			sessionCtx := getCtxResults.Context()
-			res, release := sessionCtx.ClaimRequest(
-				context.TODO(),
+			sessionCtx := sandstormhttpbridge.GetSessionContext(bridge, req)
+			res, _ := sessionCtx.ClaimRequest(
+				req.Context(),
 				func(p grain_capnp.SessionContext_claimRequest_Params) error {
 					p.SetRequestToken(string(buf))
 					return nil
 				})
-			defer release()
 			results, err := res.Struct()
 			if err != nil {
 				badReq(w, "claim request", err)
