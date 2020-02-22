@@ -6,6 +6,9 @@ clean:
 	rm -f app app.stripped app.debug
 dev: all
 	spk dev -p .sandstorm/sandstorm-pkgdef.capnp:pkgdef
+pack: sandstorm-filesystem.spk
+sandstorm-filesystem.spk: all
+	spk pack -p .sandstorm/sandstorm-pkgdef.capnp:pkgdef $@
 
 app: pb-requests.capnp.go
 	go build -v -i -o app
@@ -27,4 +30,4 @@ pb-requests.capnp.go: pb-requests.capnp
 #
 # The downside is we sometimes end up re-building app.debug and app.stripped
 # when we don't need to.
-.PHONY: all clean app
+.PHONY: all dev pack clean app
