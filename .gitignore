@@ -1,7 +1,10 @@
 *.swp
+
+# Build outputs:
 /app
 /app.debug
 /app.stripped
+*.spk
 
 # The one in .sandstorm is authoritative:
 /sandstorm-files.list
