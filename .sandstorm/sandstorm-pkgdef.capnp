@@ -10,7 +10,7 @@ const pkgdef :Spk.PackageDefinition = (
   # The package definition. Note that the spk tool looks specifically for the
   # "pkgdef" constant.
 
-  id = "qw9ge09e8m0v22hkfm6jf6nekfwh7yz64eamsa6ddg064krza3gh",
+  id = "mkz5s2dnu705t3ucyn46suk5qpt9a442gu6xe37teae7gfdtmq8h",
   # Your app ID is actually its public key. The private key was placed in
   # your keyring. All updates must be signed with the same key.
 
