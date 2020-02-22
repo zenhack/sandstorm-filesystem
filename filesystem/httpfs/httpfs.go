@@ -251,7 +251,7 @@ func (fs *FileSystem) Open(name string) (http.File, error) {
 			p.SetName(nodeName)
 			return nil
 		})
-		node := res.Node()
+		node = res.Node()
 		toRelease = append(toRelease, release)
 		dir = filesystem.Directory{node.Client}
 	}
