@@ -30,15 +30,8 @@ $Go.import("zenhack.net/go/sandstorm-filesystem/filesystem");
 interface Node @0x955400781a01b061 {
   # A node in the filesystem. This is either a file or a directory.
 
-  stat @0 (followLinks :Bool = true) -> (info :StatInfo);
-  # Report information about the node. If the node is a symlink and
-  # followLinks is true, this reports information about the target
-  # of the link. If followLinks is false, it reports information about
-  # the link itself.
-  #
-  # Links should be followed transitively, so a correct implementation
-  # should never return a StatInfo with a variant of symlink when
-  # followLinks is true.
+  stat @0 () -> (info :StatInfo);
+  # Report information about the node.
 }
 
 struct StatInfo {
@@ -46,9 +39,6 @@ struct StatInfo {
     dir @0 :Void;
     file :group {
       size @1 :Int64;
-    }
-    symlink :group {
-      target @4 :Text;
     }
   }
   executable @2 :Bool;
