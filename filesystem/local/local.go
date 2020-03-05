@@ -24,7 +24,7 @@ var (
 	InvalidArgument = errors.New("Invalid argument")
 	IllegalFileName = errors.New("Illegal file name")
 	OpenFailed      = errors.New("Open failed")
-	NotImplemented  = errors.New("Not implemented")
+	NotImplemented  = capnp.Unimplemented("Not implemented")
 )
 
 func NewNode(path string) (*Node, error) {
