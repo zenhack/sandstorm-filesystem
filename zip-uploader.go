@@ -77,7 +77,6 @@ func initZipUploader(bridge bridge_capnp.SandstormHttpBridge) {
 			badReq := func(s string) {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(s))
-				return
 			}
 			if rootRwDir.Client == nil {
 				badReq("Don't have filesystem cap")
